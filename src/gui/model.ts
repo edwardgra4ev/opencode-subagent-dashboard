@@ -87,7 +87,6 @@ export function buildTree(infos: SessionInfo[], rootID: string, deps: BuildDeps)
 export function mergeBackground(
   rows: Row[],
   tasks: readonly { id: string; type: string; label: string; agent?: string }[],
-  _deps: BuildDeps,
 ): Row[] {
   const known = new Set(rows.map((row) => row.id))
   const pending: Row[] = []
@@ -113,8 +112,8 @@ export function mergeBackground(
 export function formatTokens(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0"
   if (n < 1000) return String(Math.round(n))
-  const scaled = n < 1e6 ? n / 1e3 : n / 1e6
-  const unit = n < 1e6 ? "k" : "M"
+  const scaled = n < 999_950 ? n / 1e3 : n / 1e6
+  const unit = n < 999_950 ? "k" : "M"
   const text = scaled.toFixed(1)
   return `${text.endsWith(".0") ? text.slice(0, -2) : text}${unit}`
 }
