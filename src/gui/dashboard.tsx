@@ -1,17 +1,79 @@
-import { usePlugin, type MountedSession } from "@opencode/plugin/gui"
+import { For, Show, createMemo } from "solid-js"
+import { createKeyed, usePlugin, type MountedSession } from "@opencode/plugin/gui"
+import { buildTree, formatCost, formatTokens, mergeBackground } from "./model.js"
 import type { definition } from "./definition.js"
+
+function message(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === "object" && error && "message" in error) return String(error.message)
+  return String(error)
+}
 
 export function DashboardView(props: { session: MountedSession }) {
   const ctx = usePlugin<typeof definition>()
 
+  createKeyed(
+    () => props.session,
+    (session) => {
+      void session.server.data.session
+        .sync(session.id, { children: true })
+        .catch((error: unknown) =>
+          ctx.toast.show({ variant: "error", title: ctx.t("state.error", { message: message(error) }) }),
+        )
+    },
+  )
+
+  const rows = createMemo(() => {
+    const session = props.session
+    const data = session.server.data.session
+    const deps = {
+      status: (id: string) => data.status(id),
+      missing: (id: string) => data.missing(id),
+    }
+    return mergeBackground(buildTree(data.list(), session.id, deps), session.background, deps)
+  })
+
   return (
     <div class="sd-root">
-      <div class="sd-empty">{ctx.t("state.empty")}</div>
+      <Show when={rows().length > 0} fallback={<div class="sd-empty">{ctx.t("state.empty")}</div>}>
+        <div class="sd-list">
+          <For each={rows()}>
+            {(row) => (
+              <div
+                class="sd-row"
+                classList={{ "sd-muted": row.missing, "sd-pending": row.pending }}
+                style={{ "padding-left": `${row.depth * 14}px` }}
+              >
+                <span class={`sd-dot sd-dot-${row.status}`} title={ctx.t(`status.${row.status}`)} />
+                <span class="sd-agent">{row.agent ?? "—"}</span>
+                <span class="sd-title" title={row.title}>
+                  {row.title}
+                </span>
+                <span class="sd-num">{formatTokens(row.tokens.input + row.tokens.output)}</span>
+                <span class="sd-num">{formatCost(row.cost)}</span>
+              </div>
+            )}
+          </For>
+        </div>
+      </Show>
     </div>
   )
 }
 
 export const panelCss = `
-.sd-root { display: flex; flex-direction: column; gap: 8px; height: 100%; padding: 8px; font-size: 12px; }
+.sd-root { display: flex; flex-direction: column; gap: 8px; height: 100%; padding: 8px; font-size: 12px; overflow: auto; }
 .sd-empty { padding: 12px 8px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
+.sd-list { display: flex; flex-direction: column; }
+.sd-row { display: flex; align-items: center; gap: 6px; min-height: 22px; padding: 2px 6px; border-radius: 4px; }
+.sd-row:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
+.sd-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--v2-text-text-faint, rgba(127,127,127,.7)); }
+.sd-dot-running { background: var(--v2-blue, #3b82f6); }
+.sd-dot-succeeded { background: var(--v2-green, #30a46c); }
+.sd-dot-failed { background: var(--v2-red, #e5484d); }
+.sd-dot-interrupted { background: var(--v2-orange, #f76b15); }
+.sd-agent { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
+.sd-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-num { flex: none; font-variant-numeric: tabular-nums; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
+.sd-muted { opacity: .55; }
+.sd-pending { font-style: italic; opacity: .8; }
 `
