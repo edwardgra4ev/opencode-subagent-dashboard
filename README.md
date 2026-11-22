@@ -3,9 +3,10 @@
 A side-panel plugin for OpenCode Desktop 2 that shows the subagents of the current session as
 a tree: which ones are running, what they are doing, and what they have cost so far.
 
-Each row carries a status dot, the agent name, the session title, tokens (input + output), cost
-and elapsed time. Click a row to open that subagent's session in a new tab. A `⚡ N` badge in the
-bottom bar of the window appears while subagents run.
+Each row carries a status dot, the agent name, the session title, the four token buckets
+(`↑ input`, `↓ output`, `R cache read`, `W cache write`), their total, cost and elapsed time.
+Click a row to open its detail inside the panel; the button at the right edge of the row opens
+that subagent's chat in a new tab. While subagents run, the panel's tab title shows how many.
 
 Russian version: [README.ru.md](README.ru.md).
 
@@ -42,6 +43,20 @@ git -C ~/.config/opencode/plugins/subagent-dashboard pull
 
 Then restart Desktop (or reload plugins from the app).
 
+## Install from a release archive
+
+Every tagged release attaches `opencode-subagent-dashboard-vX.Y.Z.zip`: `src`, the built `dist`,
+the docs and the build configs (`package.json`, the lockfile, `vite.config.ts`, `tsconfig.json`).
+No `node_modules` and no git history, so the archive installs without Node.js:
+
+```bash
+mkdir -p ~/.config/opencode/plugins/subagent-dashboard
+unzip opencode-subagent-dashboard-v0.1.0.zip \
+  -d ~/.config/opencode/plugins/subagent-dashboard
+```
+
+Then point `plugins` at `./plugins/subagent-dashboard` as in the git install and restart Desktop.
+
 ## Install elsewhere
 
 The plugin also loads from any directory. Point `plugins` at it directly, absolute or relative
@@ -65,8 +80,8 @@ to the config directory:
 
 The panel lists the subagents of the session in the current tab, not every session of the app.
 
-**Staying open.** Open the panel once - from the `+` menu, the palette, `/agents` or the badge -
-and it stays pinned: every session you switch to gets it back. Closing the panel's tab unpins it.
+**Staying open.** Open the panel once - from the `+` menu, the palette or `/agents` - and it
+stays pinned: every session you switch to gets it back. Closing the panel's tab unpins it.
 Desktop keeps panel tabs per session, so the plugin reopens its own panel on a switch; after a
 Desktop restart the panel also opens by itself if it was open when you quit.
 
@@ -79,8 +94,9 @@ on top. Children always sit directly under their parent, so the tree reads top t
 A subagent that is known from the session's `background` list but is not in the session store
 yet is listed first as running, in italics, until it is synced.
 
-**Row.** Status dot, agent, title, tokens (input + output), cost, time. The title is cut to one
-line; hover shows it in full. Statuses and dot colors:
+**Row.** Status dot, agent, title, and on the right the four token buckets - `↑` input,
+`↓` output, `R` cache read, `W` cache write - then their total, the cost and the elapsed time.
+The title is cut to one line; hover shows it in full. Statuses and dot colors:
 
 | Status | Dot | Meaning |
 | --- | --- | --- |
@@ -90,30 +106,38 @@ line; hover shows it in full. Statuses and dot colors:
 | Interrupted | orange | Stopped before finishing |
 | Idle | grey | Known, not started or not running |
 
-**Empty usage.** A still-running subagent with no usage events yet shows `—` for tokens and
-cost instead of zeros. Amounts format as `812`, `12.3k`, `1.2M`; cost below one cent shows
-`<$0.01`.
+A running dot pulses; with `prefers-reduced-motion: reduce` the animation is off.
+
+**Empty usage.** A still-running subagent with no usage events yet shows one `—` instead of the
+buckets, the total, the cost and the time, rather than zeros. Amounts format as `812`, `12.3k`,
+`1.2M`; a total of `input + output + read + write`; cost below one cent shows `<$0.01`.
 
 **Time.** For a running row, time since the run started (`time.busy`) up to now, refreshed
 once a second. For a finished row, the run duration, `idle - busy`. If either timestamp is
 missing, `—`.
 
-**Click.** A row opens that subagent's session in a new tab. The `▸` twisty at the left of a row
-expands its output instead, while the row itself still opens the chat. Rows of sessions that no
-longer exist (`missing`, for example after a deletion) are dimmed, disabled and have no twisty.
+**Click a row.** A row opens that subagent's detail inside the panel; clicking it again returns
+to the list (see below). The arrow button at the right edge of the row, tooltip **Open chat**,
+opens that subagent's session in a new tab. Rows of sessions that no longer exist (`missing`,
+for example after a deletion) are dimmed and disabled, so neither action is available.
 
-**Inline output.** `▸` replaces the list with that subagent's last output: its row stays pinned at
-the top and the output fills the rest of the panel with its own scroll. The filter, the finished
-group and `+N more` are hidden while it is open; the footer stays. `▾` brings the list back where
-you left it, with the same focus and scroll position. Only one output is open at a time, and
-switching sessions closes it.
+**Detail.** The detail replaces the list: the agent's row stays pinned at the top and gets two
+tabs, **Input** and **Output**. **Input** is the task the subagent was given - the first user
+message with text; **Output** is the last text its assistant wrote. Both are rendered as
+markdown by Desktop: headings, lists, tables, code with highlighting and a copy button, links.
+Reasoning and tool calls are not shown. The output fills the remaining height of the panel and
+scrolls inside it; the footer stays. Switch tabs with the mouse or with `←`/`→`; `Home` and
+`End` jump to Input and Output. The detail always opens on **Output**, one detail is open at a
+time, and opening another row replaces it.
 
-The output is the last text the subagent's assistant wrote, rendered as markdown by Desktop:
-headings, lists, tables, code with highlighting and a copy button, links. Reasoning and tool
-calls are not shown. It is fetched the first time you expand the row: `Loading output…` until it
-arrives, `No output yet` when the subagent has not answered.
+The detail is fetched the first time you open it: `Loading output…` until the messages arrive.
+An empty Output tab reads `No output yet`; the Input tab reads `No prompt recorded` once the
+session's history is fully loaded. Older messages are loaded on the first open of the Input tab,
+so it can show `Loading output…` while the prompt is still being fetched. If that load fails the
+tab shows `Could not load the output: …`, and clicking **Input** again retries.
 
-**Filter.** **Only active** hides finished subagents and the finished group.
+**Filter.** **Only active** hides finished subagents and the finished group. It appears once the
+session has subagents.
 
 **Finished group.** Finished subagents sit under a `N finished` header that collapses on click.
 It starts expanded when there are at most 5 of them, collapsed above that.
@@ -123,11 +147,9 @@ It starts expanded when there are at most 5 of them, collapsed above that.
 **States.** `No subagents yet` while the session has none, `Loading…` while the first sync
 runs, `No active subagents` when the filter leaves nothing, and a toast when the sync fails.
 
-**Footer.** `N agents · X tokens · $Y` for every subagent of the session, including those
-hidden by the filter, the finished group or the row limit.
-
-**Badge.** While at least one subagent of the current session runs, `⚡ N` sits in the bottom
-bar of the window. Clicking it opens the panel.
+**Footer.** `3 agents · ↑ input 4.2k · ↓ output 812 · R 80k · W 11.4k · total 96.4k · $0.12`
+for every subagent of the session, including those hidden by the filter, the finished group or
+the row limit.
 
 **Notifications.** When a subagent finishes while no window of the app has focus, a system
 notification appears: failed runs as errors, the rest as normal completions. Clicking it opens
@@ -136,17 +158,24 @@ Agent and Errors, plus their sounds) and arrive at most once per completion.
 
 **Data.** Everything comes from the Desktop session store and its events; the plugin reads
 nothing else. Switching to a session loads its children once, then status, tokens and timers
-update as events arrive. Panel state (filter, expanded groups, the open output) resets when you
-switch sessions.
+update as events arrive.
+
+**Panel state.** The filter, the finished group, `+N more`, the open detail and the list's
+scroll position are kept per session. Leaving the panel's tab, or switching to another session
+and back, restores what you were looking at; closing the panel's tab drops that session's
+state.
 
 ## Limits and notes
 
 - Only subagents of the current session are listed; other tabs' sessions are not.
 - Tree depth is capped at 3; deeper subagents show as `…`.
 - At most 200 rows render before `+N more`.
-- The output is only the last assistant text: reasoning, tool calls and earlier turns are left
-  out. It is loaded on the first expansion of a row, and one output is open at a time.
-- A `missing` row has no twisty, so its output cannot be opened.
+- The Output tab holds only the last assistant text: reasoning, tool calls and earlier turns
+  are left out. The Input tab holds only the first user message; later steering messages are
+  not part of it.
+- A `missing` row is dimmed and disabled, so its detail cannot be opened.
+- One detail is open at a time. Each session remembers its own open detail and list position,
+  but the detail always reopens on the Output tab.
 - Built for OpenCode Desktop 2.3.x and the experimental GUI plugin API; a Desktop update may
   break the panel until the plugin is updated.
 - A running row is always timed from `time.busy`, because a resumed session keeps an older
@@ -174,19 +203,31 @@ Structure:
 | Path | Purpose |
 | --- | --- |
 | `src/index.ts` | server half: `Plugin.define({ id: "subagent-dashboard" })`, no handlers |
-| `src/gui.tsx` | GUI entry: panel, pinning, `+` menu item, `/agents` command, bottom-bar slot, styles |
-| `src/gui/dashboard.tsx` | the panel: rows, inline output, filter, finished group, row limit, footer |
-| `src/gui/badge.tsx` | `⚡ N` badge and completion notifications |
-| `src/gui/model.ts` | pure model: tree, ordering, background merge, last assistant text, formatters |
+| `src/gui.tsx` | GUI entry: panel, pinning, `+` menu item, `/agents` command, running count in the tab title, completion notifications, styles |
+| `src/gui/dashboard.tsx` | the panel: rows, chat button, detail with Input/Output tabs, filter, finished group, row limit, footer, per-session view state |
+| `src/gui/model.ts` | pure model: tree, ordering, background merge, `lastAssistantText`, `userPromptText`, formatters |
 | `src/gui/definition.ts` | plugin definition with the en/ru dictionaries |
 | `src/gui/i18n.ts` | English and Russian copy |
 
-Expanding an output syncs that session's messages (`message.sync`), so a session that is also open
-in a chat tab may re-read its message window.
+Opening a detail syncs that session's messages (`message.sync`), so a session that is also open
+in a chat tab may re-read its message window. Loading the Input tab fetches the session's older
+messages the same way.
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main` and on pull requests: `npm ci`,
+`npm run typecheck`, `npm run build`, then fails if the built `dist/` differs from the commit
+(`git diff --exit-code -- dist`). Change anything under `src/`, rebuild and commit `dist`, or CI
+rejects the branch.
 
 ## Releases
 
 Bump `version` in `package.json`, add a `CHANGELOG.md` entry, tag `vX.Y.Z` and push the tag.
+`.github/workflows/release.yml` then builds the plugin, checks that the tag equals
+`v<version>` from `package.json`, packs
+`opencode-subagent-dashboard-vX.Y.Z.zip` (`src`, `dist`, the docs and the build configs) and
+attaches it to the GitHub Release with generated notes. See [Install from a release
+archive](#install-from-a-release-archive).
 
 ## License
 
