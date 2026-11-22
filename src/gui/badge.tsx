@@ -8,7 +8,7 @@ type Snapshot = { status: AgentStatus; title: string; agent?: string; endedAt?: 
 /** Statuses worth a notification; `idle` is a waypoint, not an end. */
 const TERMINAL: ReadonlySet<AgentStatus> = new Set(["succeeded", "failed", "interrupted"])
 
-export function AgentsBadge() {
+export function AgentsBadge(props: { onOpen: () => void }) {
   const ctx = usePlugin<typeof definition>()
   const session = () => ctx.sessions.current()
 
@@ -57,6 +57,7 @@ export function AgentsBadge() {
   const open = () => {
     const current = session()
     if (current) ctx.layout.open(`${ctx.id}:agents`, current)
+    props.onOpen()
   }
 
   return (
