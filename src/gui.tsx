@@ -25,6 +25,8 @@ export default Plugin.define({
       pinned =
         (!!current && ctx.layout.state(key, current) !== "closed") ||
         ctx.sessions.list().some((session) => ctx.layout.state(key, session) !== "closed")
+      // Pinned but closed in the restored current session: open it once here, so no tab switch is needed after a restart.
+      if (pinned && current && ctx.layout.state(key, current) === "closed") ctx.layout.open(key, current)
     })
 
     // Every routing gives a new session object; reopen the tab if the user pinned it and this session lacks it.

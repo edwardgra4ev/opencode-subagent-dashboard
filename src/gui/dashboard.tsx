@@ -43,16 +43,20 @@ function rowCost(row: Row): string {
 function OutputBlock(props: { data: SessionData; id: string; depth: number; pending: boolean }) {
   const ctx = usePlugin<typeof definition>()
   const text = createMemo(() => lastAssistantText(props.data.message.list(props.id)))
-  const body = () =>
-    text() ?? (props.pending || props.data.message.loading(props.id) ? ctx.t("output.loading") : ctx.t("output.empty"))
+  const waiting = () => props.pending || props.data.message.loading(props.id)
   return (
-    <pre
+    <div
       class="sd-out"
       id={`sd-out-${props.id}`}
       style={{ "padding-left": `${8 + (props.depth + 1) * 14}px` }}
     >
-      {body()}
-    </pre>
+      <Show
+        when={text()}
+        fallback={<span class="sd-out-state">{ctx.t(waiting() ? "output.loading" : "output.empty")}</span>}
+      >
+        {(source) => <ctx.ui.Markdown text={source()} />}
+      </Show>
+    </div>
   )
 }
 
@@ -316,7 +320,8 @@ export const panelCss = `
 .sd-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sd-num { flex: none; font-variant-numeric: tabular-nums; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-time { min-width: 34px; text-align: right; }
-.sd-out { flex: 1 0 100%; box-sizing: border-box; margin: 0 0 2px; padding: 6px 8px; border-radius: 4px; background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); color: var(--v2-text-text-base, inherit); font-family: inherit; font-size: 11px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+.sd-out { flex: 1 0 100%; box-sizing: border-box; margin: 0 0 2px; padding: 6px 8px; border-radius: 4px; background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); font-size: 11px; max-height: 240px; overflow: auto; }
+.sd-out-state { color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-group { all: unset; display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 11px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-group:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
 .sd-group:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
