@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { createKeyed, createVisitState, usePlugin, type MountedSession } from "@opencode/plugin/gui"
-import { buildTree, formatCost, formatElapsed, formatTokens, mergeBackground, type Row } from "./model.js"
+import { formatCost, formatElapsed, formatTokens, visibleRows, type Row } from "./model.js"
 import type { definition } from "./definition.js"
 
 /** Rows rendered before the list asks whether to show the rest. */
@@ -41,15 +41,7 @@ export function DashboardView(props: { session: MountedSession }) {
     },
   )
 
-  const rows = createMemo(() => {
-    const session = props.session
-    const data = session.server.data.session
-    const deps = {
-      status: (id: string) => data.status(id),
-      missing: (id: string) => data.missing(id),
-    }
-    return mergeBackground(buildTree(data.list(), session.id, deps), session.background)
-  })
+  const rows = createMemo(() => visibleRows(props.session.server.data.session, props.session))
 
   const anyRunning = createMemo(() => rows().some((row) => row.status === "running"))
 
@@ -184,4 +176,7 @@ export const panelCss = `
 .sd-footer { flex: none; padding: 6px 2px 0; border-top: 1px solid var(--v2-border-border-base, rgba(127,127,127,.25)); color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-muted { opacity: .55; }
 .sd-pending { font-style: italic; opacity: .8; }
+.sd-badge { all: unset; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; color: var(--v2-text-text-base, inherit); }
+.sd-badge:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
+.sd-badge:focus-visible { outline: 1px solid var(--v2-blue, #3b82f6); outline-offset: -1px; }
 `

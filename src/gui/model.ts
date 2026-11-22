@@ -83,6 +83,20 @@ export function buildTree(infos: SessionInfo[], rootID: string, deps: BuildDeps)
   return rows
 }
 
+export type SessionData = ServerRef["data"]["session"]
+
+/** The session's rows as the panel shows them: the store tree plus background subagents not in the store yet. */
+export function visibleRows(
+  data: SessionData,
+  session: { readonly id: string; readonly background: readonly { id: string; type: string; label: string; agent?: string }[] },
+): Row[] {
+  const deps: BuildDeps = {
+    status: (id) => data.status(id),
+    missing: (id) => data.missing(id),
+  }
+  return mergeBackground(buildTree(data.list(), session.id, deps), session.background)
+}
+
 /** Adds running `background` subagents that are not in the store yet, pending rows first. */
 export function mergeBackground(
   rows: Row[],

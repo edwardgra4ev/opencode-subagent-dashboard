@@ -1,6 +1,7 @@
-import { Command, MenuItem, Panel, Plugin, Style, type PanelTab } from "@opencode/plugin/gui"
+import { Command, MenuItem, Panel, Plugin, Slot, Style, type PanelTab } from "@opencode/plugin/gui"
 import { definition } from "./gui/definition.js"
 import { DashboardView, panelCss } from "./gui/dashboard.js"
+import { AgentsBadge } from "./gui/badge.js"
 
 export default Plugin.define({
   ...definition,
@@ -34,6 +35,7 @@ export default Plugin.define({
 
     ctx.add(Panel, panel)
     ctx.add(Style, panelCss)
+    ctx.add(Slot, { at: "window.bottom", render: () => <AgentsBadge /> })
     ctx.add(
       MenuItem,
       (): MenuItem => {

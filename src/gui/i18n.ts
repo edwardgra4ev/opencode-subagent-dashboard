@@ -15,6 +15,8 @@ export const en = {
   "status.failed": "Failed",
   "status.interrupted": "Interrupted",
   "status.idle": "Idle",
+  "badge.label": "{{count}} running subagents",
+  "notify.done": "Subagent finished: {{title}}",
 }
 
 export const ru = {
@@ -34,4 +36,6 @@ export const ru = {
   "status.failed": "Ошибка",
   "status.interrupted": "Прерван",
   "status.idle": "Простаивает",
+  "badge.label": "{{count}} сабагентов выполняется",
+  "notify.done": "Сабагент завершён: {{title}}",
 }
