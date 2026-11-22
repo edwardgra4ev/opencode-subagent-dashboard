@@ -73,6 +73,12 @@ export function DashboardView(props: { session: MountedSession }) {
   // Sessions whose messages were already asked for; a failure drops the id so a later expansion retries.
   const outputRequests = new Set<string>()
 
+  // The detail replaces the list, so the list's scroll and its twisties are parked here across the swap.
+  let listScroll: HTMLDivElement | undefined
+  let listScrollTop = 0
+  let detailTwisty: HTMLButtonElement | undefined
+  const listTwisties = new Map<string, HTMLButtonElement>()
+
   // Forget the panel's view state when the session changes, not only on a new visit after Home.
   createKeyed(
     () => props.session.key,
@@ -84,6 +90,8 @@ export function DashboardView(props: { session: MountedSession }) {
         setOpenOutput(undefined)
         setPendingOutputs(new Set<string>())
         outputRequests.clear()
+        // Another session opens at the top, not where the previous list was.
+        listScrollTop = 0
       }),
   )
 
@@ -204,21 +212,47 @@ export function DashboardView(props: { session: MountedSession }) {
   }
 
   const toggleOutput = (id: string) => {
+    // Only the twisty calls this, so the swap is always user-driven: focus and scroll may follow it.
     if (openOutput() === id) {
       setOpenOutput(undefined)
+      // Solid swaps the views synchronously, so the list's refs are live by this microtask.
+      queueMicrotask(() => {
+        if (listScroll) listScroll.scrollTop = listScrollTop
+        // A row that dropped out of the list has no twisty: leave the focus where it is.
+        listTwisties.get(id)?.focus({ preventScroll: true })
+      })
       return
     }
+    listScrollTop = listScroll?.scrollTop ?? 0
     setOpenOutput(id)
     requestOutput(id)
+    queueMicrotask(() => detailTwisty?.focus())
+  }
+
+  /** Keeps a handle on the twisty that opened a view, so a swap can hand the focus back or forward. */
+  const trackTwisty = (el: HTMLButtonElement, id: string, where: "list" | "detail") => {
+    if (where === "detail") {
+      detailTwisty = el
+      onCleanup(() => {
+        if (detailTwisty === el) detailTwisty = undefined
+      })
+      return
+    }
+    listTwisties.set(id, el)
+    onCleanup(() => {
+      // A re-keyed row can mount its replacement before the old node runs cleanup; keep the newer ref.
+      if (listTwisties.get(id) === el) listTwisties.delete(id)
+    })
   }
 
   // Shared by the list and the detail header: same twisty, same click target.
-  const rowLine = (row: () => Row) => (
+  const rowLine = (row: () => Row, where: "list" | "detail") => (
     <div class="sd-rowline">
       <Show when={!row().missing || outputOpen(row().id)}>
         <button
           type="button"
           class="sd-twisty"
+          ref={(el) => trackTwisty(el, row().id, where)}
           aria-expanded={outputOpen(row().id)}
           aria-controls={outputOpen(row().id) ? `sd-out-${row().id}` : undefined}
           aria-label={ctx.t(outputOpen(row().id) ? "output.hide" : "output.show")}
@@ -258,7 +292,7 @@ export function DashboardView(props: { session: MountedSession }) {
     </div>
   )
 
-  const rowView = (row: () => Row) => <div class="sd-item">{rowLine(row)}</div>
+  const rowView = (row: () => Row) => <div class="sd-item">{rowLine(row, "list")}</div>
 
   return (
     <div class="sd-root">
@@ -271,7 +305,7 @@ export function DashboardView(props: { session: MountedSession }) {
                 <ctx.ui.Switch label={ctx.t("filter.active")} checked={activeOnly()} onChange={setActiveOnly} />
               </div>
             </Show>
-            <div class="sd-scroll">
+            <div class="sd-scroll" ref={(el) => (listScroll = el)}>
               <Show
                 when={count() > 0}
                 fallback={<div class="sd-empty">{ctx.t(loading() ? "state.loading" : "state.empty")}</div>}
@@ -305,7 +339,7 @@ export function DashboardView(props: { session: MountedSession }) {
       >
         {(row) => (
           <div class="sd-detail">
-            {rowLine(row)}
+            {rowLine(row, "detail")}
             <OutputBlock
               data={props.session.server.data.session}
               id={row().id}
