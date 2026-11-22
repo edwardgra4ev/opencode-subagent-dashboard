@@ -234,6 +234,8 @@ export function DashboardView(props: { session: MountedSession }) {
   })
 
   createEffect(() => {
+    // Before the first sync the list is empty, so a restored output must not be dropped: the effect re-runs once rows land.
+    if (count() === 0) return
     const id = openOutput()
     if (id !== undefined && !byId().has(id)) setOpenOutput(undefined)
   })
