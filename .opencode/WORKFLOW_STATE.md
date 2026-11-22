@@ -25,16 +25,34 @@ OpenCode Desktop GUI plugin: side panel `agents` listing subagents of the curren
 1. [done] Skeleton: package.json/tsconfig/vite, empty panel registered (Panel + MenuItem + Command `/agents`),
    `npm i`, `npm run typecheck`, `npm run build` → `dist/gui-experimental.cjs`. Commit `f487759` on `feat/skeleton`.
    Awaiting Desktop load check by user (plugin added to `~/.config/opencode/opencode.json`, needs restart).
-2. Data: `src/gui/model.ts` (buildTree/sortRows/formatters) + wired tree. Not started.
-3. UI rows/badges/footer. 4. Navigation. 5. Polish/i18n. 6. Optional bottom badge/notify. 7. Docs + release.
+2. [done] Data: `src/gui/model.ts` + wiring. Commit `e260d31`.
+3. [done] UI rows/badges/footer/loading. Commit `60d47b3`.
+4. [done] Navigation: row click → `ctx.tabs.open`, missing rows disabled. Commit `d8bc60e`.
+5. [done] Polish: timer, only-active filter, finished collapse, >200 truncation, sticky footer. Commit `c735c39`.
+6. [done] Bottom-strip badge + completion notification. Commit `36fde8c`.
+7. [done] Docs (README/README.ru/CHANGELOG/LICENSE, `9ee35f0`), release metadata + committed bundle (`dc1aa01`).
+   Note: docs commit came before metadata commit in history; `dist/` matches current `src` (build clean).
+
+## Status
+Branch `feat/skeleton` ready for review/merge; not pushed, not merged. Desktop verification pending user restart.
 
 ## Decisions
 - Panel id `agents`, key `${ctx.id}:agents`, region `side`, width 360, mobile order 62, icon `fork`,
   tab `closable:"compact"`, `fallback:true`.
 - Command slash `agents`, MenuItem `session.panel` keybind `${ctx.id}.open`.
 - No RPC, no SQLite: only reactive GUI data APIs.
-- Placeholder view in stage 1: only empty state text; no data reading.
+- Order: tree order wins over global flat sort. `buildTree` sorts siblings (running first, then
+  `time.created` desc); `mergeBackground` no longer re-sorts the whole DFS list, so a child always stays under
+  its parent. Documented in README.
+- Depth cap 3, deeper children shown as a synthetic disabled "…" row.
+- Zero tokens/cost on a running row render as "—" (usage events may not have arrived yet).
+- Notify on arrival of a terminal status (succeeded/failed/interrupted), deduped per completion
+  (`endedAt`/`busyAt`), never on the first snapshot or a foreign session.
+- Panel state (`activeOnly`, `expanded`, `finishedOpen`) resets on session key change.
 
 ## Verification log
-- Step 1: `npm run typecheck` exit 0; `npm run build` exit 0, `dist/gui-experimental.cjs` 1955 bytes (vite 7.3.8).
-- Desktop load: not verified yet (requires app restart).
+- Step 1: `npm run typecheck` exit 0; `npm run build` exit 0.
+- Steps 2–6: typecheck/build exit 0 after each commit; tester harness (outside repo) 121/121 PASS at `da39f4c`,
+  32 failures on the pre-fix tree; reviewer: no BLOCK, all FIX items fixed in `4cda389` + `da39f4c`.
+- Desktop load, themes, notifications, click navigation: not verified (needs app restart).
+- No test runner in repo: model/UI checks live in /tmp harnesses only (open risk).
