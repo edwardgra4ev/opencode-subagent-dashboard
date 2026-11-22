@@ -50,6 +50,17 @@ Branch `feat/skeleton` ready for review/merge; not pushed, not merged. Desktop v
   (`endedAt`/`busyAt`), never on the first snapshot or a foreign session.
 - Panel state (`activeOnly`, `expanded`, `finishedOpen`) resets on session key change.
 
+## Follow-up (after 0.1.0)
+- User request 1: panel must stay open when switching session tabs. Layout tabs are stored per session in the GUI API,
+  so implement pinning: remember that the user keeps the panel open, auto-open it in the newly routed session,
+  unpin when the user closes the tab.
+- User request 2: show the subagent's last assistant output inline in the list. Chevron expands output under the row,
+  click on the row still opens the child chat; output = last assistant message text, loaded lazily via
+  `data.session.message.sync(id)` + `list(id)`.
+- User request 3: render that output as Markdown via `ctx.ui.Markdown` (app renderer, no custom parser).
+  Final layout (approved after two clarifications): expanding replaces the list — only the agent's row (fixed at the top)
+  and the output below it, which fills the remaining panel height and scrolls internally. One output at a time.
+
 ## Verification log
 - Step 1: `npm run typecheck` exit 0; `npm run build` exit 0.
 - Steps 2–6: typecheck/build exit 0 after each commit; tester harness (outside repo) 121/121 PASS at `da39f4c`,
