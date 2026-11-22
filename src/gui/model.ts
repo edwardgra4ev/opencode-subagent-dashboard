@@ -146,7 +146,7 @@ export function mergeBackground(
   return [...pending, ...rows]
 }
 
-/** The text of the last assistant message: its `text` parts joined, reasoning and tool calls skipped. */
+/** The text of the last assistant message that has one: its `text` parts joined, reasoning and tool calls skipped. */
 export function lastAssistantText(messages: readonly SessionMessageInfo[]): string | undefined {
   for (let index = messages.length - 1; index >= 0; index--) {
     const message = messages[index]
@@ -156,7 +156,7 @@ export function lastAssistantText(messages: readonly SessionMessageInfo[]): stri
       .map((part) => part.text)
       .join("\n\n")
       .trim()
-    return text || undefined
+    if (text) return text
   }
   return undefined
 }

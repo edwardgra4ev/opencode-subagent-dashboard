@@ -1,4 +1,5 @@
 import { Command, MenuItem, Panel, Plugin, Slot, Style, createKeyed, type PanelTab } from "@opencode/plugin/gui"
+import { createEffect } from "solid-js"
 import { definition } from "./gui/definition.js"
 import { DashboardView, panelCss } from "./gui/dashboard.js"
 import { AgentsBadge } from "./gui/badge.js"
@@ -8,20 +9,23 @@ export default Plugin.define({
   setup(ctx) {
     const key = `${ctx.id}:agents`
     // The user keeps the panel open: the host stores tabs per session, so a new session would otherwise start closed.
-    // Kept in memory only, so a Desktop restart starts closed again.
+    // Restored once from the persisted layout after it mounts: before that `ready()` is false and there is no
+    // current session, so a read in `setup` would always start unpinned.
     let pinned = false
     const pin = () => {
       pinned = true
     }
 
-    const current = ctx.sessions.current()
-    if (current && ctx.layout.state(key, current) !== "closed") pinned = true
-    if (
-      !pinned &&
-      ctx.layout.ready() &&
-      ctx.sessions.list().some((session) => ctx.layout.state(key, session) !== "closed")
-    )
-      pinned = true
+    let initialized = false
+    createEffect(() => {
+      if (initialized) return
+      if (!ctx.layout.ready()) return
+      const current = ctx.sessions.current()
+      initialized = true
+      pinned =
+        (!!current && ctx.layout.state(key, current) !== "closed") ||
+        ctx.sessions.list().some((session) => ctx.layout.state(key, session) !== "closed")
+    })
 
     // Every routing gives a new session object; reopen the tab if the user pinned it and this session lacks it.
     createKeyed(
