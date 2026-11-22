@@ -10,6 +10,10 @@ that subagent's chat in a new tab. While subagents run, the panel's tab title sh
 
 Russian version: [README.ru.md](README.ru.md).
 
+Addresses [anomalyco/opencode#57097](https://github.com/anomalyco/opencode/issues/57097) and
+[#12463](https://github.com/anomalyco/opencode/issues/12463) — the requests for a sub-agent status
+sidebar panel. Desktop only; the TUI equivalent is still missing upstream.
+
 ![The panel: running and finished subagents with their tokens, the finished group, and a detail with Input and Output tabs](docs/preview.gif)
 
 ## Requirements

@@ -6,6 +6,10 @@ All notable changes to this plugin are documented here. The format follows
 
 ## [0.1.1] - 2026-11-22
 
+### Docs
+
+- README links the upstream request the panel answers: `anomalyco/opencode#12463`.
+
 ### Fixed
 
 - The side panel no longer asks for a width of its own, so selecting its tab leaves the sidebar at the
