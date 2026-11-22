@@ -5,6 +5,22 @@
   "private": true,
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/edwardgra4ev/opencode-subagent-dashboard.git"
+  },
+  "homepage": "https://github.com/edwardgra4ev/opencode-subagent-dashboard#readme",
+  "bugs": {
+    "url": "https://github.com/edwardgra4ev/opencode-subagent-dashboard/issues"
+  },
+  "files": [
+    "src",
+    "dist",
+    "README.md",
+    "README.ru.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
   "engines": {
     "node": ">=20"
   },
