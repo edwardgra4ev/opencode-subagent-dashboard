@@ -19,6 +19,8 @@ export type Row = {
   busyAt?: number
   missing: boolean
   pending: boolean
+  /** A synthetic "children not shown" marker under a row at `MAX_DEPTH`. */
+  ellipsis?: boolean
 }
 
 export type BuildDeps = {
@@ -45,6 +47,23 @@ function toRow(info: SessionInfo, depth: number, deps: BuildDeps): Row {
     busyAt: info.time.busy,
     missing: deps.missing(info.id),
     pending: false,
+  }
+}
+
+/** Marker under a row at `MAX_DEPTH`, telling that its children are not expanded. */
+function ellipsisRow(parent: Row): Row {
+  return {
+    id: `${parent.id}:ellipsis`,
+    parentID: parent.id,
+    depth: parent.depth + 1,
+    title: "…",
+    status: "idle",
+    tokens: { input: 0, output: 0 },
+    cost: 0,
+    startedAt: 0,
+    missing: true,
+    pending: false,
+    ellipsis: true,
   }
 }
 
@@ -75,6 +94,7 @@ export function buildTree(infos: SessionInfo[], rootID: string, deps: BuildDeps)
       if (seen.has(row.id)) continue
       seen.add(row.id)
       rows.push(row)
+      if (depth === MAX_DEPTH && children.has(row.id)) rows.push(ellipsisRow(row))
       walk(row.id, depth + 1)
     }
   }
@@ -120,7 +140,14 @@ export function mergeBackground(
       pending: true,
     })
   }
-  return [...pending, ...sortRows(rows)]
+  // Ellipsis markers belong to their parent's subtree: sort the real rows first, then put each marker back after its parent.
+  const result = [...pending, ...sortRows(rows.filter((row) => !row.ellipsis))]
+  for (const row of rows) {
+    if (!row.ellipsis) continue
+    const index = result.findIndex((candidate) => candidate.id === row.parentID)
+    if (index >= 0) result.splice(index + 1, 0, row)
+  }
+  return result
 }
 
 export function formatTokens(n: number): string {
