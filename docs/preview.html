@@ -1,0 +1,543 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>subagent-dashboard preview</title>
+<style>
+  :root {
+    --bg: #101114;
+    --bg-base: #16171b;
+    --bg-muted: rgba(255,255,255,.055);
+    --bg-muted-2: rgba(255,255,255,.09);
+    --border: rgba(255,255,255,.10);
+    --text: #e7e7ea;
+    --dim: #a2a4ac;
+    --faint: #74767f;
+    --blue: #4c8dff;
+    --green: #30a46c;
+    --red: #e5484d;
+    --orange: #f76b15;
+    --sans: "Noto Sans", Lato, "DejaVu Sans", sans-serif;
+    --mono: MonoLisa, "Noto Sans Mono", "DejaVu Sans Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    font-family: var(--sans);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+  #stage { width: 900px; height: 520px; padding: 14px; }
+  .win {
+    width: 100%; height: 100%;
+    display: flex; flex-direction: column;
+    background: var(--bg-base);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 18px 40px rgba(0,0,0,.55);
+  }
+  .titlebar {
+    flex: none; height: 34px;
+    display: flex; align-items: center; gap: 10px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border);
+    background: #131418;
+  }
+  .lights { display: flex; gap: 6px; }
+  .lights i { width: 9px; height: 9px; border-radius: 50%; background: #3a3c44; display: block; }
+  .appname { font-size: 11.5px; color: var(--faint); }
+  .sess {
+    font-size: 11.5px; color: var(--dim);
+    padding: 3px 9px; border-radius: 6px; background: var(--bg-muted);
+  }
+  .body { flex: 1 1 auto; min-height: 0; display: flex; }
+
+  /* chat pane, deliberately quiet: the panel is the subject */
+  .chat {
+    flex: none; width: 300px; min-width: 0;
+    display: flex; flex-direction: column; gap: 12px;
+    padding: 14px 14px 10px;
+    border-right: 1px solid var(--border);
+    opacity: .62;
+  }
+  .msg { font-size: 12px; line-height: 1.55; color: var(--dim); }
+  .msg.user {
+    align-self: flex-end; max-width: 88%;
+    background: var(--bg-muted-2); color: var(--text);
+    padding: 8px 10px; border-radius: 8px;
+  }
+  .msg .who { display: block; font-size: 10.5px; letter-spacing: .04em; text-transform: uppercase; color: var(--faint); margin-bottom: 4px; }
+  .tool {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; color: var(--dim);
+    border: 1px solid var(--border); border-radius: 6px;
+    padding: 3px 8px; margin: 2px 4px 2px 0;
+  }
+  .tool b { font-weight: 600; color: var(--text); }
+  .tool .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); }
+  .tool.run .dot { background: var(--blue); animation: pulse 1.6s ease-in-out infinite; }
+  .composer {
+    margin-top: auto; height: 34px; border: 1px solid var(--border); border-radius: 8px;
+    display: flex; align-items: center; padding: 0 10px;
+    font-size: 11.5px; color: var(--faint);
+  }
+
+  /* the plugin's side panel */
+  .side { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; background: #14151a; }
+  .side-tabs {
+    flex: none; height: 30px; display: flex; align-items: flex-end; gap: 2px;
+    padding: 0 8px; border-bottom: 1px solid var(--border); background: #131418;
+  }
+  .side-tab {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11.5px; color: var(--text);
+    padding: 5px 10px; border-radius: 6px 6px 0 0;
+    background: #14151a; border: 1px solid var(--border); border-bottom: none;
+  }
+  .side-tab .plus { color: var(--faint); font-size: 13px; padding: 0 6px; }
+
+  .sd-root { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 8px; overflow: hidden; font-size: 12px; }
+  .sd-head { flex: none; padding: 1px 2px 3px; }
+  .switch { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--dim); }
+  .track { width: 26px; height: 15px; border-radius: 99px; background: var(--bg-muted-2); position: relative; transition: none; }
+  .knob { position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: #8d8f98; }
+  .switch.on .track { background: var(--blue); }
+  .switch.on .knob { left: 13px; background: #fff; }
+  .sd-list { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .sd-empty { padding: 12px 8px; color: var(--faint); }
+  .sd-rowline { display: flex; align-items: center; gap: 2px; }
+  .sd-row {
+    all: unset; display: flex; align-items: center; gap: 5px;
+    flex: 1 1 auto; min-width: 0; min-height: 24px; padding: 2px 6px;
+    border-radius: 4px; cursor: pointer; overflow: hidden;
+  }
+  .sd-row.deep { border-left: 1px solid rgba(255,255,255,.16); }
+  .sd-row.hoverlike { background: var(--bg-muted); }
+  .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--faint); }
+  .dot.running { background: var(--blue); animation: pulse 1.6s ease-in-out infinite; }
+  .dot.succeeded { background: var(--green); }
+  .dot.failed { background: var(--red); }
+  .dot.interrupted { background: var(--orange); }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+  .agent {
+    flex: none; max-width: 22%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    padding: 0 5px; border-radius: 3px; background: var(--bg-muted-2); font-size: 11.5px;
+  }
+  .title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+  .meta { display: flex; align-items: baseline; gap: 3px; flex: none; margin-left: auto; white-space: nowrap; }
+  .tok { display: inline-flex; align-items: baseline; gap: 2px; font-size: 10px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .tok i { font-style: normal; color: var(--faint); font-size: 9.5px; }
+  .num { font-size: 11.5px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .time { min-width: 26px; text-align: right; }
+  .open {
+    flex: none; width: 18px; height: 18px; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--faint); font-size: 11px;
+  }
+  .pending { font-style: italic; opacity: .82; }
+  .sd-group {
+    display: flex; align-items: center; gap: 5px; width: 100%;
+    padding: 5px 6px; font-size: 11px; color: var(--dim); font-family: var(--sans);
+    background: none; border: none; text-align: left; cursor: pointer;
+  }
+  .sd-group .caret { width: 8px; color: var(--faint); }
+  .sd-footer {
+    flex: none; display: flex; flex-wrap: nowrap; align-items: baseline; gap: 4px;
+    padding: 7px 2px 1px; border-top: 1px solid var(--border);
+    font-size: 10.5px; color: var(--dim); white-space: nowrap; overflow: hidden;
+  }
+  .sd-footer .sep { color: var(--faint); }
+  .sd-detail { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+  .sd-detail > .sd-rowline { flex: none; }
+  .sd-detail .sd-row { background: var(--bg-muted); }
+  .sd-tabs { flex: none; display: flex; gap: 2px; margin-top: 6px; border-bottom: 1px solid var(--border); }
+  .sd-tab {
+    padding: 4px 10px; font-size: 11.5px; color: var(--dim);
+    background: none; border: none; border-radius: 4px 4px 0 0; font-family: var(--sans); cursor: pointer;
+  }
+  .sd-tab.active { color: var(--text); background: var(--bg-muted-2); }
+  .sd-out {
+    flex: 1 1 auto; min-height: 0; overflow: hidden;
+    margin: 6px 0 0; padding: 9px 11px 9px 24px; border-radius: 5px;
+    background: var(--bg-muted); font-size: 11.5px; line-height: 1.55; color: var(--dim);
+  }
+  .sd-out h2 { margin: 0 0 6px; font-size: 12.5px; color: var(--text); font-weight: 600; }
+  .sd-out ul { margin: 0; padding-left: 15px; }
+  .sd-out li { margin: 0 0 3px; }
+  .sd-out code {
+    font-family: var(--mono); font-size: 10.5px;
+    background: rgba(255,255,255,.07); border-radius: 3px; padding: 1px 4px; color: #d7d9e0;
+  }
+  .sd-out p { margin: 6px 0 0; }
+  .sd-out pre {
+    margin: 8px 0 0; padding: 8px 10px; border-radius: 5px;
+    background: rgba(255,255,255,.05); border: 1px solid var(--border);
+    font-family: var(--mono); font-size: 10px; line-height: 1.6; color: #cfd2da;
+    overflow: hidden; white-space: pre;
+  }
+  .sd-out pre b { color: #8fb6ff; font-weight: 500; }
+  .state { color: var(--faint); }
+
+  .cursor {
+    position: fixed; left: 0; top: 0; width: 14px; height: 20px;
+    pointer-events: none; opacity: 0; z-index: 20;
+    transition: none;
+  }
+  .cursor svg { display: block; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
+  .ripple {
+    position: fixed; width: 26px; height: 26px; margin: -13px 0 0 -13px;
+    border-radius: 50%; border: 2px solid rgba(120,170,255,.85);
+    background: rgba(90,140,255,.22); opacity: 0; pointer-events: none; z-index: 19;
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div class="win">
+    <div class="titlebar">
+      <div class="lights"><i></i><i></i><i></i></div>
+      <div class="appname">OpenCode Desktop</div>
+      <div class="sess">auth-refresh</div>
+    </div>
+    <div class="body">
+      <div class="chat">
+        <div class="msg user">Add refresh-token rotation to the auth service. Reusing a spent token must revoke the family.</div>
+        <div class="msg">
+          <span class="who">opencode</span>
+          I’ll split this up: one agent maps the auth layer, one designs the rotation, then implementation and tests.
+        </div>
+        <div>
+          <span class="tool"><span class="dot"></span><b>task</b> explore</span>
+          <span class="tool run"><span class="dot"></span><b>task</b> architect</span>
+        </div>
+        <div class="composer">Ask opencode…</div>
+      </div>
+      <div class="side">
+        <div class="side-tabs">
+          <div class="side-tab"><span id="tabTitle">Subagents</span></div>
+          <div class="side-tab plus" style="background:none;border:none">+</div>
+        </div>
+        <div class="sd-root" id="panel"></div>
+      </div>
+    </div>
+  </div>
+</div>
+<div class="ripple" id="ripple"></div>
+<div class="cursor" id="cursor">
+  <svg width="14" height="20" viewBox="0 0 14 20"><path d="M1 1 L1 15.5 L4.6 12.2 L7 17.6 L9.4 16.5 L7 11.3 L12 10.9 Z" fill="#f2f3f6" stroke="#111" stroke-width="1"/></svg>
+</div>
+
+<script>
+// ---- formatters, copied from src/gui/model.ts ----
+function fmtTokens(n) {
+  if (!isFinite(n) || n <= 0) return "0";
+  if (n < 1000) return String(Math.round(n));
+  const scaled = n < 999950 ? n / 1e3 : n / 1e6;
+  const unit = n < 999950 ? "k" : "M";
+  const text = scaled.toFixed(1);
+  return `${text.endsWith(".0") ? text.slice(0, -2) : text}${unit}`;
+}
+function fmtCost(n) {
+  if (!isFinite(n) || n <= 0) return "$0";
+  if (n < 0.01) return "<$0.01";
+  return `$${n.toFixed(2)}`;
+}
+function fmtElapsed(ms) {
+  if (!isFinite(ms) || ms < 1000) return "0s";
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  return `${m}m`;
+}
+
+// ---- the scripted session ----
+const AGENTS = [
+  { id: "explore",   agent: "explore",   title: "Map the auth routes",        depth: 0, parent: null,
+    appear: 0.7, sync: 1.1, start: 1.1, end: 4.8, endStatus: "succeeded",
+    tokens: { input: 1840, output: 620, cacheRead: 12800, cacheWrite: 2100 }, cost: 0.0091 },
+  { id: "architect", agent: "architect", title: "Design session-token rotation", depth: 0, parent: null,
+    appear: 1.6, sync: 2.0, start: 2.0, end: null,
+    rate: { input: 520, output: 190, cacheRead: 4100, cacheWrite: 640 }, costRate: 0.0016 },
+  { id: "dev", agent: "dev", title: "Implement /auth/rotate", depth: 1, parent: "architect",
+    appear: 2.2, sync: 2.5, start: 2.5, end: 5.4, endStatus: "succeeded",
+    tokens: { input: 4200, output: 1250, cacheRead: 26000, cacheWrite: 3800 }, cost: 0.0275 },
+  { id: "tester", agent: "tester", title: "Rotation integration tests", depth: 1, parent: "architect",
+    appear: 4.0, sync: 4.3, start: 4.3, end: 7.6, endStatus: "failed",
+    tokens: { input: 3100, output: 880, cacheRead: 19400, cacheWrite: 2500 }, cost: 0.0198 },
+  { id: "docs", agent: "docs", title: "Document the rotation flow", depth: 1, parent: "architect",
+    appear: 5.8, sync: 6.2, start: 6.2, end: null,
+    rate: { input: 180, output: 70, cacheRead: 1200, cacheWrite: 210 }, costRate: 0.00013 },
+];
+
+// Finished runs burn their fixed totals across their lifetime; without this they would show the
+// final numbers the moment they appear.
+for (const a of AGENTS) {
+  if (a.rate || a.end === null) continue;
+  const dur = a.end - a.start;
+  a.rate = {
+    input: a.tokens.input / dur,
+    output: a.tokens.output / dur,
+    cacheRead: a.tokens.cacheRead / dur,
+    cacheWrite: a.tokens.cacheWrite / dur,
+  };
+  a.costRate = a.cost / dur;
+}
+
+const T_END = 14.6;
+
+const statusOf = (a, t) => {
+  if (t < a.sync) return "running"; // known but not synced: listed as running, italic
+  if (a.end !== null && t >= a.end) return a.endStatus;
+  return "running";
+};
+const pending = (a, t) => t >= a.appear && t < a.sync;
+const running = (a, t) => t >= a.appear && statusOf(a, t) === "running";
+const tokensOf = (a, t) => {
+  if (a.end !== null && t >= a.end) return a.tokens;
+  if (t < a.start) return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  if (a.rate) {
+    const span = Math.min(t, a.end ?? t) - a.start;
+    return {
+      input: Math.round(a.rate.input * span),
+      output: Math.round(a.rate.output * span),
+      cacheRead: Math.round(a.rate.cacheRead * span),
+      cacheWrite: Math.round(a.rate.cacheWrite * span),
+    };
+  }
+  return a.tokens;
+};
+const costOf = (a, t) => {
+  if (a.end !== null && t >= a.end) return a.cost;
+  return (a.costRate ?? 0) * Math.max(0, t - a.start);
+};
+const timeOf = (a, t) => {
+  if (t < a.appear) return "—";
+  if (statusOf(a, t) === "running" && t >= a.start) return fmtElapsed((t - a.start) * 1000);
+  if (a.end !== null) return fmtElapsed((a.end - a.start) * 1000);
+  return "—";
+};
+
+// clicks: what the cursor does, and what the panel shows afterwards
+const CLICKS = [
+  { t: 8.0, id: "row-architect", action: "open" },
+  { t: 10.5, id: "tab-input", action: "input" },
+  { t: 12.1, id: "row-architect", action: "close" },
+  { t: 12.7, id: "switch", action: "filter" },
+];
+
+function state(t) {
+  const detailOpen = t >= 8.05 && t < 12.1;
+  const tab = t >= 10.55 ? "input" : "output";
+  const activeOnly = t >= 12.75;
+  const rows = AGENTS.filter((a) => t >= a.appear);
+  const flat = [];
+  const tops = rows.filter((a) => a.depth === 0).sort((a, b) => (running(b, t) - running(a, t)) || (a.start - b.start));
+  for (const top of tops) {
+    flat.push(top);
+    const kids = rows.filter((a) => a.parent === top.id).sort((a, b) => (running(b, t) - running(a, t)) || (b.appear - a.appear));
+    flat.push(...kids);
+  }
+  const active = flat.filter((a) => statusOf(a, t) === "running");
+  const done = flat.filter((a) => statusOf(a, t) !== "running");
+  return { t, detailOpen, tab, activeOnly, active, done, all: flat };
+}
+
+const esc = (s) => String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+
+function rowHtml(a, s, isDetail) {
+  const tk = tokensOf(a, s.t);
+  const sum = tk.input + tk.output + tk.cacheRead + tk.cacheWrite;
+  const st = statusOf(a, s.t);
+  const dash = st === "running" && sum === 0;
+  const meta = dash
+    ? `<span class="tok">—</span>`
+    : `<span class="tok"><i>↑</i>${fmtTokens(tk.input)}</span>
+       <span class="tok"><i>↓</i>${fmtTokens(tk.output)}</span>
+       <span class="tok"><i>R</i>${fmtTokens(tk.cacheRead)}</span>
+       <span class="tok"><i>W</i>${fmtTokens(tk.cacheWrite)}</span>
+       <span class="num">${fmtTokens(sum)}</span>
+       <span class="num">${fmtCost(costOf(a, s.t))}</span>
+       <span class="num time">${timeOf(a, s.t)}</span>`;
+  const hole = s.activeOnly ? "off" : "on";
+  return `<div class="sd-rowline" id="row-${a.id}">
+    <button class="sd-row${a.depth > 0 ? " deep" : ""}${pending(a, s.t) ? " pending" : ""}${isDetail ? " hoverlike" : ""}" style="padding-left:${8 + a.depth * 14}px">
+      <span class="dot ${st}"></span>
+      <span class="agent">${esc(a.agent)}</span>
+      <span class="title">${esc(a.title)}</span>
+      <span class="meta">${meta}</span>
+    </button>
+    <span class="open">↗</span>
+  </div>`;
+}
+
+function footerHtml(s) {
+  let input = 0, output = 0, read = 0, write = 0, cost = 0;
+  for (const a of s.all) {
+    const tk = tokensOf(a, s.t);
+    input += tk.input; output += tk.output; read += tk.cacheRead; write += tk.cacheWrite;
+    cost += costOf(a, s.t);
+  }
+  const total = input + output + read + write;
+  return `<div class="sd-footer">
+    <span>${s.all.length} agents</span><span class="sep">·</span>
+    <span class="tok"><i>↑</i>${fmtTokens(input)}</span><span class="sep">·</span>
+    <span class="tok"><i>↓</i>${fmtTokens(output)}</span><span class="sep">·</span>
+    <span class="tok"><i>R</i>${fmtTokens(read)}</span><span class="sep">·</span>
+    <span class="tok"><i>W</i>${fmtTokens(write)}</span><span class="sep">·</span>
+    <span class="tok">total ${fmtTokens(total)}</span><span class="sep">·</span>
+    <span class="num">${fmtCost(cost)}</span>
+  </div>`;
+}
+
+const OUT_MD = `<h2>Rotation design</h2>
+<ul>
+  <li>Refresh tokens are single-use: every rotation issues a new pair.</li>
+  <li>Reusing a spent token revokes the whole family and signs the user out.</li>
+  <li>Access TTL <code>15m</code>, refresh TTL <code>30d</code>, clock skew <code>60s</code>.</li>
+  <li>Store only <code>sha256(token)</code>; the raw value never touches disk.</li>
+</ul>
+<p>Endpoint in <code>src/auth/rotate.ts</code>; the session middleware reads the family id from the refresh token.</p>
+<pre><b>async function</b> rotate(token, family) {
+  <b>if</b> (await seen(token)) <b>return</b> revoke(family)
+  <b>return</b> issue(pair, family)
+}</pre>`;
+
+const IN_MD = `<p>Design session-token rotation for the auth service: single-use refresh tokens, family revocation on reuse, 30-day refresh TTL. Read <code>src/auth/</code> and the existing session middleware first — do not change the cookie format.</p>`;
+
+function panelHtml(s) {
+  const count = s.all.length;
+  const head = count > 0
+    ? `<div class="sd-head"><span class="switch${s.activeOnly ? " on" : ""}" id="switch"><span class="track"><span class="knob"></span></span>Only active</span></div>`
+    : "";
+
+  if (s.detailOpen) {
+    const a = AGENTS.find((x) => x.id === "architect");
+    const loading = s.t < 8.45;
+    const body = loading
+      ? `<span class="state">Loading output…</span>`
+      : s.tab === "input" ? IN_MD : OUT_MD;
+    const detail = `<div class="sd-detail">
+      ${rowHtml(a, s, true)}
+      <div class="sd-tabs">
+        <button class="sd-tab${s.tab === "input" ? " active" : ""}" id="tab-input">Input</button>
+        <button class="sd-tab${s.tab === "output" ? " active" : ""}" id="tab-output">Output</button>
+      </div>
+      <div class="sd-out">${body}</div>
+    </div>`;
+    return detail + footerHtml(s);
+  }
+
+  if (count === 0) {
+    const text = s.t < 0.55 ? "No subagents yet" : "Loading…";
+    return `<div class="sd-empty">${text}</div>`;
+  }
+
+  const showDone = !s.activeOnly && s.done.length > 0;
+  const list = s.active.map((a) => rowHtml(a, s, false)).join("")
+    + (showDone ? `<button class="sd-group"><span class="caret">▾</span>${s.done.length} finished</button>` : "")
+    + (showDone ? s.done.map((a) => rowHtml(a, s, false)).join("") : "");
+  return head + `<div class="sd-list">${list}</div>` + footerHtml(s);
+}
+
+// ---- cursor: move to the element of the pending click, press on it, ease between ----
+const CURSOR_KEYS = [
+  { t: 7.2, x: 806, y: 470, o: 0 },
+  { t: 7.7, x: 806, y: 470, o: 1 },
+  { t: 8.0, act: "row-architect", o: 1 },
+  { t: 9.4, act: "row-architect", o: 1 },
+  { t: 10.1, act: "tab-input", o: 1 },
+  { t: 11.2, act: "tab-input", o: 1 },
+  { t: 11.8, act: "row-architect", o: 1 },
+  { t: 12.1, act: "row-architect", o: 1 },
+  { t: 12.4, act: "switch", o: 1 },
+  { t: 13.2, act: "switch", o: 1 },
+  { t: 13.6, x: 840, y: 500, o: 0 },
+];
+
+const ease = (p) => p * p * (3 - 2 * p);
+
+function cursorPos(t) {
+  const key = (k) => {
+    const el = k.act && document.getElementById(k.act);
+    if (el) {
+      const r = el.getBoundingClientRect();
+      return { x: r.left + Math.min(r.width * 0.55, 60), y: r.top + r.height * 0.62 };
+    }
+    return { x: k.x ?? 806, y: k.y ?? 470 };
+  };
+  for (let i = 0; i < CURSOR_KEYS.length - 1; i++) {
+    const a = CURSOR_KEYS[i], b = CURSOR_KEYS[i + 1];
+    if (t >= a.t && t <= b.t) {
+      const p = ease((t - a.t) / Math.max(b.t - a.t, 1e-6));
+      const pa = key(a), pb = key(b);
+      return { x: pa.x + (pb.x - pa.x) * p, y: pa.y + (pb.y - pa.y) * p, o: a.o + (b.o - a.o) * p };
+    }
+  }
+  const last = CURSOR_KEYS[CURSOR_KEYS.length - 1];
+  const p = key(last);
+  return { x: p.x, y: p.y, o: 0 };
+}
+
+const panel = document.getElementById("panel");
+const tabTitle = document.getElementById("tabTitle");
+const cursor = document.getElementById("cursor");
+const ripple = document.getElementById("ripple");
+
+function render(t) {
+  const stage = document.getElementById("stage");
+  const fade = Math.max(0, Math.min(1, t / 0.35, (T_END - t) / 0.45));
+  stage.style.opacity = String(fade);
+  const s = state(t);
+  panel.innerHTML = panelHtml(s);
+  const n = s.active.length;
+  tabTitle.textContent = n > 0 ? `Subagents · ${n}` : "Subagents";
+
+  // cursor after the DOM exists: positions come from the live nodes
+  const c = cursorPos(t);
+  cursor.style.transform = `translate(${c.x - 1}px, ${c.y - 1}px)`;
+  cursor.style.opacity = String(c.o);
+
+  let rippleAt = null;
+  for (const click of CLICKS) {
+    const dt = t - click.t;
+    if (dt >= 0 && dt < 0.4) {
+      const el = document.getElementById(click.id);
+      if (el) {
+        const r = el.getBoundingClientRect();
+        rippleAt = { x: r.left + Math.min(r.width * 0.55, 60), y: r.top + r.height * 0.62, dt };
+      }
+    }
+  }
+  if (rippleAt) {
+    const p = rippleAt.dt / 0.4;
+    ripple.style.transform = `translate(${rippleAt.x}px, ${rippleAt.y}px)`;
+    ripple.style.opacity = String(0.9 * (1 - p));
+    ripple.style.width = ripple.style.height = `${18 + p * 22}px`;
+    ripple.style.margin = `${-(9 + p * 11)}px 0 0 ${-(9 + p * 11)}px`;
+  } else {
+    ripple.style.opacity = "0";
+  }
+}
+
+const params = new URLSearchParams(location.search);
+window.__render = render;
+window.__duration = T_END;
+if (params.has("frame")) {
+  render(Number(params.get("t") ?? 0));
+  document.getElementById("stage").style.opacity = "1";
+} else {
+  render(0);
+  let t0 = performance.now();
+  const loop = (now) => {
+    const t = ((now - t0) / 1000) % T_END;
+    render(t);
+    requestAnimationFrame(loop);
+  };
+  requestAnimationFrame(loop);
+}
+</script>
+</body>
+</html>

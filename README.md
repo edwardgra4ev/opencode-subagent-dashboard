@@ -10,6 +10,8 @@ that subagent's chat in a new tab. While subagents run, the panel's tab title sh
 
 Russian version: [README.ru.md](README.ru.md).
 
+![The panel: running and finished subagents with their tokens, the finished group, and a detail with Input and Output tabs](docs/preview.gif)
+
 ## Requirements
 
 - OpenCode Desktop 2.3.x. The GUI plugin API is experimental and may change between releases.
@@ -87,7 +89,9 @@ Desktop restart the panel also opens by itself if it was open when you quit.
 
 **Tree.** Rows are grouped by `parentID` and indented by depth, so children stay under their
 parent. When a row at the deepest level (3) has children of its own, they collapse into a
-non-clickable `…` marker line.
+non-clickable `…` marker line. Children only exist when a subagent has the `task` tool and
+spawns agents itself: orchestrator-style agents do, `explore`, `docs` and most others never
+will, so a session can well stay flat.
 
 **Order.** Within one level, running rows come first, the rest follow by creation time, newest
 on top. Children always sit directly under their parent, so the tree reads top to bottom.
@@ -213,6 +217,10 @@ Structure:
 Opening a detail syncs that session's messages (`message.sync`), so a session that is also open
 in a chat tab may re-read its message window. Loading the Input tab fetches the session's older
 messages the same way.
+
+The animation at the top of this file is a mock of the panel, generated from `docs/preview.html`:
+open it for a live loop, or render one moment with `?frame=1&t=8.2` and capture the 900×520
+stage. Keep it in step with any change to the panel's look.
 
 ### Continuous integration
 
