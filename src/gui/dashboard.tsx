@@ -90,8 +90,12 @@ export function DashboardView(props: { session: MountedSession }) {
         setOpenOutput(undefined)
         setPendingOutputs(new Set<string>())
         outputRequests.clear()
-        // Another session opens at the top, not where the previous list was.
+        // Another session opens at the top: forget the parked offset and move the live container there too.
+        // A detail open at the switch closes in the same batch, so the list is mounted again by the microtask.
         listScrollTop = 0
+        queueMicrotask(() => {
+          if (listScroll) listScroll.scrollTop = 0
+        })
       }),
   )
 
