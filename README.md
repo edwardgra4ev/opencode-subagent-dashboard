@@ -96,7 +96,8 @@ yet is listed first as running, in italics, until it is synced.
 
 **Row.** Status dot, agent, title, and on the right the four token buckets - `↑` input,
 `↓` output, `R` cache read, `W` cache write - then their total, the cost and the elapsed time.
-The title is cut to one line; hover shows it in full. Statuses and dot colors:
+The title is cut to one line; screen readers get the full title from the row's accessible name.
+Statuses and dot colors:
 
 | Status | Dot | Meaning |
 | --- | --- | --- |
