@@ -469,7 +469,4 @@ export const panelCss = `
 .sd-footer { flex: none; padding: 6px 2px 0; border-top: 1px solid var(--v2-border-border-base, rgba(127,127,127,.25)); color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-muted { opacity: .55; }
 .sd-pending { font-style: italic; opacity: .8; }
-.sd-badge { all: unset; display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; color: var(--v2-text-text-base, inherit); }
-.sd-badge:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
-.sd-badge:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
 `

@@ -1,8 +1,13 @@
-import { Command, MenuItem, Panel, Plugin, Slot, Style, createKeyed, type PanelTab } from "@opencode/plugin/gui"
-import { createEffect } from "solid-js"
+import { Command, MenuItem, Panel, Plugin, Style, createKeyed, type PanelTab } from "@opencode/plugin/gui"
+import { createEffect, createSignal } from "solid-js"
 import { definition } from "./gui/definition.js"
 import { DashboardView, panelCss } from "./gui/dashboard.js"
-import { AgentsBadge } from "./gui/badge.js"
+import { visibleRows, type AgentStatus } from "./gui/model.js"
+
+type Snapshot = { status: AgentStatus; title: string; agent?: string; endedAt?: number; busyAt?: number }
+
+/** Statuses worth a notification; `idle` is a waypoint, not an end. */
+const TERMINAL: ReadonlySet<AgentStatus> = new Set(["succeeded", "failed", "interrupted"])
 
 export default Plugin.define({
   ...definition,
@@ -37,10 +42,58 @@ export default Plugin.define({
       },
     )
 
+    // Running count for the tab title, so a background subagent is visible without the window-bottom strip.
+    const [running, setRunning] = createSignal(0)
+    createEffect(() => {
+      const current = ctx.sessions.current()
+      setRunning(
+        current
+          ? visibleRows(current.server.data.session, current).filter((row) => row.status === "running").length
+          : 0,
+      )
+    })
+
+    // Last snapshot of the routed session's rows: a row that reaches a terminal status after another one notifies,
+    // a first sight of a row or a session does not. The old strip owned this; the panel itself is per session now.
+    let snapshot = new Map<string, Snapshot>()
+    let route: string | undefined
+    createEffect(() => {
+      const current = ctx.sessions.current()
+      const next = new Map<string, Snapshot>()
+      if (current) {
+        for (const row of visibleRows(current.server.data.session, current)) {
+          if (row.ellipsis) continue
+          next.set(row.id, {
+            status: row.status,
+            title: row.title,
+            agent: row.agent,
+            endedAt: row.endedAt,
+            busyAt: row.busyAt,
+          })
+        }
+      }
+      const previous = current?.key === route ? snapshot : undefined
+      route = current?.key
+      snapshot = next
+      if (!current || !previous) return
+      for (const [id, row] of next) {
+        const prior = previous.get(id)
+        if (!prior || prior.status === row.status || !TERMINAL.has(row.status)) continue
+        void ctx.attention.notify({
+          title: ctx.t("notify.done", { title: row.title }),
+          message: row.agent,
+          variant: row.status === "failed" ? "error" : "default",
+          session: { server: current.server.id, id },
+          id: `${current.id}:${id}:${row.status}:${row.endedAt ?? row.busyAt ?? 0}`,
+        })
+      }
+    })
+
     const tab: PanelTab = {
       id: "agents",
       get title() {
-        return ctx.t("panel.title")
+        const count = running()
+        return count > 0 ? `${ctx.t("panel.title")} · ${count}` : ctx.t("panel.title")
       },
       closable: "compact",
       fallback: true,
@@ -67,7 +120,6 @@ export default Plugin.define({
 
     ctx.add(Panel, panel)
     ctx.add(Style, panelCss)
-    ctx.add(Slot, { at: "window.bottom", render: () => <AgentsBadge onOpen={pin} /> })
     ctx.add(
       MenuItem,
       (): MenuItem => {
