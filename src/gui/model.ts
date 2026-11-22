@@ -14,7 +14,7 @@ export type Row = {
   title: string
   status: AgentStatus
   outcome?: "succeeded" | "failed" | "interrupted"
-  tokens: { input: number; output: number }
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number }
   cost: number
   startedAt: number
   endedAt?: number
@@ -42,7 +42,12 @@ function toRow(info: SessionInfo, depth: number, deps: BuildDeps): Row {
     title: info.title?.trim() || info.agent || info.id,
     status: deps.status(info.id) === "running" ? "running" : (info.outcome ?? "idle"),
     outcome: info.outcome,
-    tokens: { input: info.tokens.input, output: info.tokens.output },
+    tokens: {
+      input: info.tokens.input,
+      output: info.tokens.output,
+      cacheRead: info.tokens.cache.read,
+      cacheWrite: info.tokens.cache.write,
+    },
     cost: info.cost,
     startedAt: info.time.created,
     endedAt: info.time.idle,
@@ -60,7 +65,7 @@ function ellipsisRow(parent: Row): Row {
     depth: parent.depth + 1,
     title: "…",
     status: "idle",
-    tokens: { input: 0, output: 0 },
+    tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     cost: 0,
     startedAt: 0,
     missing: true,
@@ -135,7 +140,7 @@ export function mergeBackground(
       agent: task.agent,
       title: task.label || task.agent || task.id,
       status: "running",
-      tokens: { input: 0, output: 0 },
+      tokens: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       cost: 0,
       startedAt: 0,
       missing: false,

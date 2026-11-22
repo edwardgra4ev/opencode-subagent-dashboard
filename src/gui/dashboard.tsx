@@ -290,6 +290,25 @@ export function DashboardView(props: { session: MountedSession }) {
     })
   }
 
+  /** Second row of a row: each token bucket. A run with nothing used yet shows one dash instead. */
+  const breakdown = (row: Row) => {
+    const tokens = row.tokens
+    const empty =
+      tokens.input === 0 && tokens.output === 0 && tokens.cacheRead === 0 && tokens.cacheWrite === 0
+    if (empty && (row.status === "running" || row.pending)) return { text: "—", title: undefined }
+    return {
+      text: ctx.t("row.breakdown", {
+        input: formatTokens(tokens.input),
+        output: formatTokens(tokens.output),
+        cache: formatTokens(tokens.cacheRead + tokens.cacheWrite),
+      }),
+      title: ctx.t("row.cacheDetail", {
+        read: formatTokens(tokens.cacheRead),
+        write: formatTokens(tokens.cacheWrite),
+      }),
+    }
+  }
+
   // Shared by the list and the detail header: same twisty, same click target.
   const rowLine = (row: () => Row, where: "list" | "detail") => (
     <div class="sd-rowline">
@@ -332,6 +351,9 @@ export function DashboardView(props: { session: MountedSession }) {
           <span class="sd-num">{rowTokens(row())}</span>
           <span class="sd-num">{rowCost(row())}</span>
           <span class="sd-num sd-time">{rowTime(row(), now())}</span>
+          <span class="sd-breakdown" title={breakdown(row()).title}>
+            {breakdown(row()).text}
+          </span>
         </Show>
       </button>
     </div>
@@ -420,7 +442,7 @@ export const panelCss = `
 .sd-twisty { all: unset; flex: none; box-sizing: border-box; width: 16px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; cursor: pointer; font-size: 10px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-twisty:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
 .sd-twisty:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
-.sd-row { all: unset; display: flex; align-items: center; gap: 6px; box-sizing: border-box; flex: 1 1 auto; min-width: 0; min-height: 22px; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+.sd-row { all: unset; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; box-sizing: border-box; flex: 1 1 auto; min-width: 0; min-height: 22px; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
 .sd-row:hover:not(:disabled) { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
 .sd-row:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
 .sd-row:disabled { cursor: default; }
@@ -434,6 +456,7 @@ export const panelCss = `
 .sd-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sd-num { flex: none; font-variant-numeric: tabular-nums; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-time { min-width: 34px; text-align: right; }
+.sd-breakdown { flex: 1 0 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: -1px; font-size: 10px; font-variant-numeric: tabular-nums; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-out { flex: 1 1 auto; min-height: 0; overflow: auto; box-sizing: border-box; margin: 0; padding: 6px 8px; border-radius: 4px; background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); font-size: 11px; }
 .sd-out-state { color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-group { all: unset; display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 11px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
