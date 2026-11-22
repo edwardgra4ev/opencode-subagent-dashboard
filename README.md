@@ -65,6 +65,11 @@ to the config directory:
 
 The panel lists the subagents of the session in the current tab, not every session of the app.
 
+**Staying open.** Open the panel once - from the `+` menu, the palette, `/agents` or the badge -
+and it stays pinned: every session you switch to gets it back. Closing the panel's tab unpins it.
+Desktop keeps panel tabs per session, so the plugin reopens its own panel on a switch; after a
+Desktop restart the panel also opens by itself if it was open when you quit.
+
 **Tree.** Rows are grouped by `parentID` and indented by depth, so children stay under their
 parent. When a row at the deepest level (3) has children of its own, they collapse into a
 non-clickable `…` marker line.
@@ -93,8 +98,20 @@ cost instead of zeros. Amounts format as `812`, `12.3k`, `1.2M`; cost below one 
 once a second. For a finished row, the run duration, `idle - busy`. If either timestamp is
 missing, `—`.
 
-**Click.** A row opens that subagent's session in a new tab. Rows of sessions that no longer
-exist (`missing`, for example after a deletion) are dimmed and disabled.
+**Click.** A row opens that subagent's session in a new tab. The `▸` twisty at the left of a row
+expands its output instead, while the row itself still opens the chat. Rows of sessions that no
+longer exist (`missing`, for example after a deletion) are dimmed, disabled and have no twisty.
+
+**Inline output.** `▸` replaces the list with that subagent's last output: its row stays pinned at
+the top and the output fills the rest of the panel with its own scroll. The filter, the finished
+group and `+N more` are hidden while it is open; the footer stays. `▾` brings the list back where
+you left it, with the same focus and scroll position. Only one output is open at a time, and
+switching sessions closes it.
+
+The output is the last text the subagent's assistant wrote, rendered as markdown by Desktop:
+headings, lists, tables, code with highlighting and a copy button, links. Reasoning and tool
+calls are not shown. It is fetched the first time you expand the row: `Loading output…` until it
+arrives, `No output yet` when the subagent has not answered.
 
 **Filter.** **Only active** hides finished subagents and the finished group.
 
@@ -119,13 +136,17 @@ Agent and Errors, plus their sounds) and arrive at most once per completion.
 
 **Data.** Everything comes from the Desktop session store and its events; the plugin reads
 nothing else. Switching to a session loads its children once, then status, tokens and timers
-update as events arrive. Panel state (filter, expanded groups) resets when you switch sessions.
+update as events arrive. Panel state (filter, expanded groups, the open output) resets when you
+switch sessions.
 
 ## Limits and notes
 
 - Only subagents of the current session are listed; other tabs' sessions are not.
 - Tree depth is capped at 3; deeper subagents show as `…`.
 - At most 200 rows render before `+N more`.
+- The output is only the last assistant text: reasoning, tool calls and earlier turns are left
+  out. It is loaded on the first expansion of a row, and one output is open at a time.
+- A `missing` row has no twisty, so its output cannot be opened.
 - Built for OpenCode Desktop 2.3.x and the experimental GUI plugin API; a Desktop update may
   break the panel until the plugin is updated.
 - A running row is always timed from `time.busy`, because a resumed session keeps an older
@@ -153,12 +174,15 @@ Structure:
 | Path | Purpose |
 | --- | --- |
 | `src/index.ts` | server half: `Plugin.define({ id: "subagent-dashboard" })`, no handlers |
-| `src/gui.tsx` | GUI entry: panel, `+` menu item, `/agents` command, bottom-bar slot, styles |
-| `src/gui/dashboard.tsx` | the panel: rows, filter, finished group, row limit, footer |
+| `src/gui.tsx` | GUI entry: panel, pinning, `+` menu item, `/agents` command, bottom-bar slot, styles |
+| `src/gui/dashboard.tsx` | the panel: rows, inline output, filter, finished group, row limit, footer |
 | `src/gui/badge.tsx` | `⚡ N` badge and completion notifications |
-| `src/gui/model.ts` | pure model: tree, ordering, background merge, formatters |
+| `src/gui/model.ts` | pure model: tree, ordering, background merge, last assistant text, formatters |
 | `src/gui/definition.ts` | plugin definition with the en/ru dictionaries |
 | `src/gui/i18n.ts` | English and Russian copy |
+
+Expanding an output syncs that session's messages (`message.sync`), so a session that is also open
+in a chat tab may re-read its message window.
 
 ## Releases
 

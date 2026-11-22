@@ -29,6 +29,13 @@ All notable changes to this plugin are documented here. The format follows
   clicking it opens the panel.
 - System notification when a subagent finishes while no window has focus, failed runs flagged as
   errors, at most one per completion, following the user's OpenCode notification settings.
+- The panel stays open across session switches once you open it (menu, palette, `/agents` or
+  badge) and reopens itself after a Desktop restart if it was open on exit; closing its tab
+  unpins it.
+- Expandable last output per row: a `▸` twisty, the detail replacing the list with the agent's
+  row pinned at the top and the output filling the remaining height with its own scroll,
+  markdown rendering, lazy loading, one output open at a time.
+- The list keeps its focus and scroll position when you come back from an output.
 - Empty, loading and sync-error states.
 - English and Russian copy.
 
