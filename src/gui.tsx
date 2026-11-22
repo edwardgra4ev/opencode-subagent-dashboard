@@ -108,9 +108,11 @@ export default Plugin.define({
     }
 
     const panel: Panel = {
-      id: "agents",
+      // The panel id keys the app's stored side width and its narrow-screen mobile view, so a width the user
+      // dragged under the old id is no longer read; the tab id and its `agents` key are unchanged, so stored
+      // tabs and pinning survive.
+      id: "agents-side",
       region: "side",
-      width: 360,
       mobile: {
         get title() {
           return ctx.t("panel.title")

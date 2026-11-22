@@ -34,11 +34,13 @@ OpenCode Desktop GUI plugin: side panel `agents` listing subagents of the curren
    Note: docs commit came before metadata commit in history; `dist/` matches current `src` (build clean).
 
 ## Status
-Branch `feat/skeleton` ready for review/merge; not pushed, not merged. Desktop verification pending user restart.
+0.1.0 released: `main` at `3f16b5e`, tag `v0.1.0` pushed. Active bugfix branch `fix/sidebar-width-sync`,
+uncommitted; runtime behaviour after the panel-id change is not verified yet.
 
 ## Decisions
-- Panel id `agents`, key `${ctx.id}:agents`, region `side`, width 360, mobile order 62, icon `fork`,
-  tab `closable:"compact"`, `fallback:true`.
+- Panel id `agents-side` (since the width fix: the host keys the stored side width and the mobile view by panel id;
+  changed from `agents` to stop reading a width dragged under the old id), tab id `agents`, tab key `${ctx.id}:agents`,
+  region `side`, mobile order 62, icon `fork`, tab `closable:"compact"`, `fallback:true`.
 - Command slash `agents`, MenuItem `session.panel` keybind `${ctx.id}.open`.
 - No RPC, no SQLite: only reactive GUI data APIs.
 - Order: tree order wins over global flat sort. `buildTree` sorts siblings (running first, then
@@ -84,9 +86,40 @@ Branch `feat/skeleton` ready for review/merge; not pushed, not merged. Desktop v
   `softprops/action-gh-release`).
 - Release: bump/tag `v0.1.0`, merge `feat/skeleton` → `main`, push main + tag.
 
+## Fix: sidebar width sync (branch `fix/sidebar-width-sync`)
+- Bug: `agents` panel declared `width: 360`, so the side region took the panel's own width and resized on tab switch.
+  Reported by the user with a screen recording: two sidebar tabs share a width, `agents` stretches.
+- Host docs (`@opencode/plugin/dist/gui/registries.d.ts`, `Panel.width`): a number gives the panel its own side width;
+  omit it to share the conversation's width like other tabs. Decision: remove the field.
+- This alone did not change the runtime behaviour after a Desktop restart. Root cause found in the installed app
+  (`/opt/OpenCode/resources/app.asar`, renderer `route-*.js`): the width is
+  `panelWidths[`${pluginId}:${panel.id}`] ?? provider.width`, and the app persisted
+  `{"panelWidths":{"subagent-dashboard:agents":635.35546875}}` in `~/.config/ai.opencode.desktop/drafts.sqlite`
+  (state `opencode.global.dat / layout`). With an override present the drag handler writes that per-panel value
+  instead of the shared one, and the API has no delete.
+- Decision: rename `Panel.id` to `agents-side`, keeping `PanelTab.id` and the tab key `${ctx.id}:agents`, so the
+  orphaned width is not read, stored tabs and pinning keep working. Trade-off: the mobile view key becomes
+  `${ctx.id}:agents-side`; the host keeps the narrow-screen selection in memory per routing visit, so no stored
+  selection is lost.
+- Files: `src/gui.tsx`, rebuilt `dist/gui-experimental.cjs`, `CHANGELOG.md` (Unreleased / Fixed),
+  `.opencode/WORKFLOW_STATE.md`.
+- Stage: round 3 in progress (comment and CHANGELOG wording fixed after reviewer findings); runtime behaviour after
+  the id change not yet verified — needs a Desktop restart.
+
 ## Verification log
 - Step 1: `npm run typecheck` exit 0; `npm run build` exit 0.
 - Steps 2–6: typecheck/build exit 0 after each commit; tester harness (outside repo) 121/121 PASS at `da39f4c`,
   32 failures on the pre-fix tree; reviewer: no BLOCK, all FIX items fixed in `4cda389` + `da39f4c`.
 - Desktop load, themes, notifications, click navigation: not verified (needs app restart).
 - No test runner in repo: model/UI checks live in /tmp harnesses only (open risk).
+
+- Fix `fix/sidebar-width-sync`: `npm run build` exit 0 (twice, dist byte-identical); `npm run typecheck` exit 0;
+  `grep -c "width:360" dist/gui-experimental.cjs` → 0; reviewer round 2 OK on code and dist.
+- Fix `fix/sidebar-width-sync`, tester: typecheck PASS, build PASS, dist byte-identical to a fresh build, no
+  `width:360` in bundle or src, no stale "own width" claims in docs. Runtime alignment of the region still unverified
+  headlessly; needs a Desktop restart (the plugin loads `dist` at start).
+- Fix `fix/sidebar-width-sync` after the id rename: runtime evidence from the user's machine showed the stale
+  `panelWidths` entry, not the code, kept the own width; the rename is not runtime-verified yet.
+- Fix `fix/sidebar-width-sync`, tester round 2: typecheck 0, build 0, fresh build byte-identical to the tree bundle
+  (`cmp` 0), `agents-side` in the bundle, no `width:360` in src/bundle/docs. Runtime alignment still needs a Desktop
+  restart + manual check (drag, switch tabs, sidebar must not jump).
