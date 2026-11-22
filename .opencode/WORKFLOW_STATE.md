@@ -61,6 +61,29 @@ Branch `feat/skeleton` ready for review/merge; not pushed, not merged. Desktop v
   Final layout (approved after two clarifications): expanding replaces the list — only the agent's row (fixed at the top)
   and the output below it, which fills the remaining panel height and scrolls internally. One output at a time.
 
+- User request 4: panel UI state (filter, finished group, expanded, open output, list scroll) must survive remounts
+  (switching panel tabs) — keep it in a module-level map keyed by `session.key`.
+- User request 5: per-row token breakdown on a second line: `in · out · cache` (cache = read + write, tooltip with R/W).
+- User request 6: remove the `window.bottom` badge (the API gives each plugin its own footer row, so it cannot share a line
+  with git-status); show the running count in the panel tab title instead. Notifications move into `setup`.
+
+## Process rules (binding)
+- `dev` → `reviewer` → commit → `tester`. No commit and no test run before reviewer `OK`; no merge/tag before tester PASS.
+- No parallel writers on the same files/types. One writer at a time.
+
+- User request 7: token breakdown on one line (no second row): compact `↑in ↓out ⇄cache` in the main row; total column drops in favour
+  of the three buckets (footer keeps input+output totals).
+- User request 8: the expanded output gets two tabs — Input (the task the agent was given, i.e. the user prompt) and Output
+  (last assistant answer), switchable.
+- User request 9: the bottom summary shows input, output and cache separately (same compact notation), plus agents count and cost.
+
+## Release plan (user request)
+- Push to https://github.com/edwardgra4ev/opencode-subagent-dashboard (origin, branch main after merge).
+- CI/CD: adapt `token-stats-gui-plugin` workflows: `ci.yml` (npm ci, typecheck, build, `git diff --exit-code -- dist`)
+  on push/PR; `release.yml` on `v*` tags (typecheck, build, tag == package.json version, zip src+dist+docs,
+  `softprops/action-gh-release`).
+- Release: bump/tag `v0.1.0`, merge `feat/skeleton` → `main`, push main + tag.
+
 ## Verification log
 - Step 1: `npm run typecheck` exit 0; `npm run build` exit 0.
 - Steps 2–6: typecheck/build exit 0 after each commit; tester harness (outside repo) 121/121 PASS at `da39f4c`,
