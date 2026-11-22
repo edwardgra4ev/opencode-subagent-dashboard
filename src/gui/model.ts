@@ -166,6 +166,16 @@ export function lastAssistantText(messages: readonly SessionMessageInfo[]): stri
   return undefined
 }
 
+/** The task the agent was given: the first user message with text. Later steering messages are not part of it. */
+export function userPromptText(messages: readonly SessionMessageInfo[]): string | undefined {
+  for (const message of messages) {
+    if (message.type !== "user") continue
+    const text = message.text.trim()
+    if (text.length > 0) return text
+  }
+  return undefined
+}
+
 export function formatTokens(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0"
   if (n < 1000) return String(Math.round(n))

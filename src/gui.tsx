@@ -1,7 +1,7 @@
 import { Command, MenuItem, Panel, Plugin, Style, createKeyed, type PanelTab } from "@opencode/plugin/gui"
-import { createEffect, createSignal } from "solid-js"
+import { createEffect, createMemo, createSignal } from "solid-js"
 import { definition } from "./gui/definition.js"
-import { DashboardView, panelCss } from "./gui/dashboard.js"
+import { DashboardView, forgetPanelState, panelCss } from "./gui/dashboard.js"
 import { visibleRows, type AgentStatus } from "./gui/model.js"
 
 type Snapshot = { status: AgentStatus; title: string; agent?: string; endedAt?: number; busyAt?: number }
@@ -26,31 +26,38 @@ export default Plugin.define({
       if (initialized) return
       if (!ctx.layout.ready()) return
       const current = ctx.sessions.current()
+      if (!current) return
       initialized = true
       pinned =
-        (!!current && ctx.layout.state(key, current) !== "closed") ||
+        ctx.layout.state(key, current) !== "closed" ||
         ctx.sessions.list().some((session) => ctx.layout.state(key, session) !== "closed")
       // Pinned but closed in the restored current session: open it once here, so no tab switch is needed after a restart.
-      if (pinned && current && ctx.layout.state(key, current) === "closed") ctx.layout.open(key, current)
+      // `append` keeps the selection and the preview slot: the restore must not steal another panel's tab.
+      if (pinned && ctx.layout.state(key, current) === "closed") {
+        ctx.layout.open(key, current, { tab: "append" })
+      }
     })
 
     // Every routing gives a new session object; reopen the tab if the user pinned it and this session lacks it.
     createKeyed(
       () => ctx.sessions.current(),
       (session) => {
-        if (pinned && ctx.layout.state(key, session) === "closed") ctx.layout.open(key, session)
+        if (pinned && ctx.layout.state(key, session) === "closed") {
+          ctx.layout.open(key, session, { tab: "append" })
+        }
       },
     )
+
+    // The routed session's rows, computed once per update: the running count and the notification snapshot share it.
+    const currentRows = createMemo(() => {
+      const current = ctx.sessions.current()
+      return current ? visibleRows(current.server.data.session, current) : undefined
+    })
 
     // Running count for the tab title, so a background subagent is visible without the window-bottom strip.
     const [running, setRunning] = createSignal(0)
     createEffect(() => {
-      const current = ctx.sessions.current()
-      setRunning(
-        current
-          ? visibleRows(current.server.data.session, current).filter((row) => row.status === "running").length
-          : 0,
-      )
+      setRunning(currentRows()?.filter((row) => row.status === "running").length ?? 0)
     })
 
     // Last snapshot of the routed session's rows: a row that reaches a terminal status after another one notifies,
@@ -59,9 +66,10 @@ export default Plugin.define({
     let route: string | undefined
     createEffect(() => {
       const current = ctx.sessions.current()
+      const rows = currentRows()
       const next = new Map<string, Snapshot>()
-      if (current) {
-        for (const row of visibleRows(current.server.data.session, current)) {
+      if (current && rows) {
+        for (const row of rows) {
           if (row.ellipsis) continue
           next.set(row.id, {
             status: row.status,
@@ -113,8 +121,10 @@ export default Plugin.define({
       },
       list: (input) => (pinned || input.open.includes("agents") ? [tab] : []),
       render: (props) => <DashboardView session={props.session} />,
-      close: () => {
+      close: (input) => {
         pinned = false
+        // The panel's view state belongs to a session that no longer shows it: drop it so closing tabs does not leak.
+        forgetPanelState(input.session.key)
       },
     }
 

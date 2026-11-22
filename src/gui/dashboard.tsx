@@ -1,10 +1,11 @@
-import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
+import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js"
 import { createKeyed, usePlugin, type MountedSession } from "@opencode/plugin/gui"
 import {
   formatCost,
   formatElapsed,
   formatTokens,
   lastAssistantText,
+  userPromptText,
   visibleRows,
   type Row,
   type SessionData,
@@ -29,38 +30,161 @@ function rowTime(row: Row, now: number): string {
   return "—"
 }
 
-/** A run that has not used anything yet shows a dash instead of a zero. */
-function rowTokens(row: Row): string {
-  const total = row.tokens.input + row.tokens.output
-  return row.status === "running" && total === 0 ? "—" : formatTokens(total)
-}
-
 function rowCost(row: Row): string {
   return row.status === "running" && row.cost === 0 ? "—" : formatCost(row.cost)
 }
 
-/** A subagent's last assistant text, loaded on first expansion. */
-function OutputBlock(props: { data: SessionData; id: string; depth: number; pending: boolean }) {
+/** The two views of a subagent's transcript. */
+type OutputTab = "input" | "output"
+
+/** A subagent's prompt and last assistant text, loaded on first expansion, in two tabs. */
+function OutputBlock(props: {
+  data: SessionData
+  id: string
+  depth: number
+  pending: boolean
+  tab: OutputTab
+  onTab: (tab: OutputTab) => void
+}) {
   const ctx = usePlugin<typeof definition>()
-  const text = createMemo(() => lastAssistantText(props.data.message.list(props.id)))
-  const waiting = () => props.pending || props.data.message.loading(props.id)
-  return (
-    <div
-      class="sd-out"
-      id={`sd-out-${props.id}`}
-      style={{ "padding-left": `${8 + (props.depth + 1) * 14}px` }}
+  const messages = createMemo(() => props.data.message.list(props.id))
+  const input = createMemo(() => userPromptText(messages()))
+  const output = createMemo(() => lastAssistantText(messages()))
+  const loading = () => props.data.message.loading(props.id)
+  const more = () => props.data.message.more(props.id)
+  // Own request state: the store's `loading` may stay false while `loadMore` runs, and a failure must be visible.
+  const [busy, setBusy] = createSignal(false)
+  const [inputError, setInputError] = createSignal<string | undefined>()
+  const [retryTick, setRetryTick] = createSignal(0)
+  const waiting = () => props.pending || loading() || busy()
+  const text = () => {
+    if (props.tab === "output") return output()
+    // While history is partial the first user message may be a steering one: wait for the rest instead of showing it.
+    return more() ? undefined : input()
+  }
+  // With older messages on the server the prompt may still be coming: only claim there is none once nothing is left to load.
+  const empty = () => {
+    if (props.tab === "output") return "output.empty"
+    return more() ? "output.loading" : "output.inputEmpty"
+  }
+  const tabId = (tab: OutputTab) => `sd-tab-${tab}-${props.id}`
+  const panelId = () => `sd-out-${props.id}`
+
+  let panel: HTMLDivElement | undefined
+  onCleanup(() => (panel = undefined))
+
+  // Both tabs share the panel: switching must start at its top, not where the other tab was left.
+  createEffect(() => {
+    props.tab
+    if (panel) panel.scrollTop = 0
+  })
+
+  // The store may hold only the newest messages: fetch the rest so the first prompt is found. A `message.sync` can
+  // shrink the window again, hence one extra load per open; an error stops automatic retries until the user retries.
+  let loadFor: string | undefined
+  let loadCount = 0
+  const requestLoad = (id: string) => {
+    if (loadFor !== id) {
+      loadFor = id
+      loadCount = 0
+    }
+    loadCount++
+    setBusy(true)
+    void props.data.message
+      .loadMore(id, { all: true })
+      .catch((error: unknown) => {
+        setInputError(ctx.t("output.error", { message: message(error) }))
+      })
+      .finally(() => setBusy(false))
+  }
+  createEffect(() => {
+    const id = props.id
+    retryTick()
+    if (props.tab !== "input" || inputError() !== undefined) {
+      // The error belongs to the input tab; leaving it drops the stale text.
+      if (props.tab !== "input") setInputError(undefined)
+      return
+    }
+    // A sync in flight will re-run this effect; only ask when it is done and history is still partial.
+    if (!more() || loading() || busy()) return
+    if (loadFor === id && loadCount >= 2) return
+    requestLoad(id)
+  })
+
+  // Picking the input tab again is the explicit retry: clear the error and give the load another chance.
+  const openTab = (tab: OutputTab) => {
+    if (tab === "input") {
+      loadFor = undefined
+      setInputError(undefined)
+      setRetryTick((tick) => tick + 1)
+    }
+    props.onTab(tab)
+  }
+
+  const focusTab = (tab: OutputTab) => {
+    queueMicrotask(() => document.getElementById(tabId(tab))?.focus({ preventScroll: true }))
+  }
+
+  // WAI-ARIA tabs: arrows move between the two, Home/End jump to the first/last, and the inactive one is out of the tab order.
+  const onKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Home" || event.key === "End") {
+      event.preventDefault()
+      const next: OutputTab = event.key === "Home" ? "input" : "output"
+      props.onTab(next)
+      focusTab(next)
+      return
+    }
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
+    event.preventDefault()
+    const next: OutputTab = props.tab === "input" ? "output" : "input"
+    props.onTab(next)
+    focusTab(next)
+  }
+
+  const tabButton = (tab: OutputTab) => (
+    <button
+      type="button"
+      role="tab"
+      id={tabId(tab)}
+      class="sd-tab"
+      classList={{ "sd-tab-active": props.tab === tab }}
+      aria-selected={props.tab === tab}
+      aria-controls={panelId()}
+      tabindex={props.tab === tab ? 0 : -1}
+      onClick={() => openTab(tab)}
     >
-      <Show
-        when={text()}
-        fallback={<span class="sd-out-state">{ctx.t(waiting() ? "output.loading" : "output.empty")}</span>}
+      {ctx.t(tab === "input" ? "output.tab.input" : "output.tab.output")}
+    </button>
+  )
+
+  return (
+    <>
+      <div class="sd-tabs" role="tablist" aria-label={ctx.t("output.tabs")} onKeyDown={onKeyDown}>
+        {tabButton("input")}
+        {tabButton("output")}
+      </div>
+      <div
+        class="sd-out"
+        id={panelId()}
+        ref={(el) => (panel = el)}
+        role="tabpanel"
+        aria-labelledby={tabId(props.tab)}
+        style={{ "padding-left": `${8 + (props.depth + 1) * 14}px` }}
       >
-        {(source) => <ctx.ui.Markdown text={source()} />}
-      </Show>
-    </div>
+        <Show
+          when={text()}
+          fallback={
+            <span class="sd-out-state">{inputError() ?? ctx.t(waiting() ? "output.loading" : empty())}</span>
+          }
+        >
+          {(source) => <ctx.ui.Markdown text={source()} />}
+        </Show>
+      </div>
+    </>
   )
 }
 
-type PanelState = {
+type PanelUiState = {
   activeOnly: boolean
   finishedOpen: boolean | undefined
   expanded: boolean
@@ -69,14 +193,19 @@ type PanelState = {
 }
 
 /** Per-session view state, kept at module level so it survives the host remounting the panel on a tab switch. */
-const panelStates = new Map<string, PanelState>()
+const panelStates = new Map<string, PanelUiState>()
 
-function panelState(key: string): PanelState {
+function panelState(key: string): PanelUiState {
   const found = panelStates.get(key)
   if (found) return found
-  const created: PanelState = { activeOnly: false, finishedOpen: undefined, expanded: false, openOutput: undefined, scrollTop: 0 }
+  const created: PanelUiState = { activeOnly: false, finishedOpen: undefined, expanded: false, openOutput: undefined, scrollTop: 0 }
   panelStates.set(key, created)
   return created
+}
+
+/** Drops a closed panel's view state: the session no longer shows the panel, so nothing will restore it. */
+export function forgetPanelState(sessionKey: string) {
+  panelStates.delete(sessionKey)
 }
 
 export function DashboardView(props: { session: MountedSession }) {
@@ -89,14 +218,18 @@ export function DashboardView(props: { session: MountedSession }) {
   const [finishedOpen, setFinishedOpen] = createSignal<boolean | undefined>(initial.finishedOpen)
   // One output at a time: opening another row closes the previous one (accordion).
   const [openOutput, setOpenOutput] = createSignal<string | undefined>(initial.openOutput)
+  // The transcript opens on the answer; another output, another session or a close resets it.
+  const [outputTab, setOutputTab] = createSignal<OutputTab>("output")
   const [pendingOutputs, setPendingOutputs] = createSignal<ReadonlySet<string>>(new Set<string>())
   // Sessions whose messages were already asked for; a failure drops the id so a later expansion retries.
   const outputRequests = new Set<string>()
 
-  // The detail replaces the list, so the list's scroll and its twisties are parked here across the swap.
+  // The detail replaces the list, so the list's scroll and its row buttons are parked here across the swap.
   let listScroll: HTMLDivElement | undefined
-  let detailTwisty: HTMLButtonElement | undefined
-  const listTwisties = new Map<string, HTMLButtonElement>()
+  let detailRow: HTMLButtonElement | undefined
+  const listRows = new Map<string, HTMLButtonElement>()
+  // The session the refs above belong to; set on the first keyed run, compared on every later one.
+  let boundKey: string | undefined
 
   // The UI signals mirror the session's entry: written on every change, read back on mount and on key change.
   // The key guard keeps a stale write from landing in the entry of a session the panel just switched to.
@@ -125,11 +258,19 @@ export function DashboardView(props: { session: MountedSession }) {
     () => props.session.key,
     (key) => {
       const state = panelState(key)
+      // Refs of the previous session's nodes must not outlive the swap; the first run has none of this session's yet.
+      if (boundKey !== undefined && boundKey !== key) {
+        listScroll = undefined
+        detailRow = undefined
+        listRows.clear()
+      }
+      boundKey = key
       batch(() => {
         setActiveOnly(state.activeOnly)
         setExpanded(state.expanded)
         setFinishedOpen(state.finishedOpen)
         setOpenOutput(state.openOutput)
+        setOutputTab("output")
         setPendingOutputs(new Set<string>())
         outputRequests.clear()
       })
@@ -174,14 +315,29 @@ export function DashboardView(props: { session: MountedSession }) {
   })
 
   const footer = createMemo(() => {
-    let tokens = 0
+    let input = 0
+    let output = 0
+    let read = 0
+    let write = 0
     let cost = 0
     for (const row of rows()) {
       if (row.ellipsis) continue
-      tokens += row.tokens.input + row.tokens.output
+      input += row.tokens.input
+      output += row.tokens.output
+      read += row.tokens.cacheRead
+      write += row.tokens.cacheWrite
       cost += row.cost
     }
-    return { count: count(), tokens: formatTokens(tokens), cost: formatCost(cost) }
+    const cache = read + write
+    return {
+      count: count(),
+      input: formatTokens(input),
+      output: formatTokens(output),
+      cacheRead: formatTokens(read),
+      cacheWrite: formatTokens(write),
+      total: formatTokens(input + output + cache),
+      cost: formatCost(cost),
+    }
   })
 
   // An ellipsis marker stays right after its parent, so it joins its parent's list rather than the finished group.
@@ -226,7 +382,6 @@ export function DashboardView(props: { session: MountedSession }) {
   // The header stays whenever the finished group exists, even while the list is truncated.
   const finishedGroup = () => !activeOnly() && finishedCount() > 0
 
-  const outputOpen = (id: string) => openOutput() === id
   // The open output replaces the list; a gone row (deleted session) falls back to the list.
   const detail = createMemo(() => {
     const id = openOutput()
@@ -237,7 +392,10 @@ export function DashboardView(props: { session: MountedSession }) {
     // Before the first sync the list is empty, so a restored output must not be dropped: the effect re-runs once rows land.
     if (count() === 0) return
     const id = openOutput()
-    if (id !== undefined && !byId().has(id)) setOpenOutput(undefined)
+    if (id !== undefined && !byId().has(id)) {
+      setOpenOutput(undefined)
+      setOutputTab("output")
+    }
   })
 
   const requestOutput = (id: string) => {
@@ -249,7 +407,7 @@ export function DashboardView(props: { session: MountedSession }) {
       .sync(id)
       .catch((error: unknown) => {
         outputRequests.delete(id)
-        ctx.toast.show({ variant: "error", title: ctx.t("state.error", { message: message(error) }) })
+        ctx.toast.show({ variant: "error", title: ctx.t("output.error", { message: message(error) }) })
       })
       .finally(() => {
         const next = new Set(pendingOutputs())
@@ -258,108 +416,162 @@ export function DashboardView(props: { session: MountedSession }) {
       })
   }
 
+  // An output restored from the panel state mounts without a click, so it must load its messages itself.
+  // Keyed by the detail's id: row updates while it is open must not retry a failed sync.
+  let requestedDetail: string | undefined
+  createEffect(() => {
+    const id = detail()?.id
+    if (id === undefined) {
+      requestedDetail = undefined
+      return
+    }
+    if (id === requestedDetail) return
+    requestedDetail = id
+    untrack(() => requestOutput(id))
+  })
+
   const toggleOutput = (id: string) => {
-    // Only the twisty calls this, so the swap is always user-driven: focus and scroll may follow it.
+    // The row itself calls this: the swap is user-driven, so focus and scroll may follow it.
     if (openOutput() === id) {
       setOpenOutput(undefined)
+      setOutputTab("output")
       // Solid swaps the views synchronously, so the list's refs are live by this microtask.
       queueMicrotask(() => {
         if (listScroll) listScroll.scrollTop = panelState(props.session.key).scrollTop
-        // A row that dropped out of the list has no twisty: leave the focus where it is.
-        listTwisties.get(id)?.focus({ preventScroll: true })
+        // A row that dropped out of the list has no button: leave the focus where it is.
+        listRows.get(id)?.focus({ preventScroll: true })
       })
       return
     }
     panelState(props.session.key).scrollTop = listScroll?.scrollTop ?? 0
     setOpenOutput(id)
+    setOutputTab("output")
     requestOutput(id)
-    queueMicrotask(() => detailTwisty?.focus())
+    queueMicrotask(() => detailRow?.focus())
   }
 
-  /** Keeps a handle on the twisty that opened a view, so a swap can hand the focus back or forward. */
-  const trackTwisty = (el: HTMLButtonElement, id: string, where: "list" | "detail") => {
+  /** Keeps a handle on the row button that opened a view, so a swap can hand the focus back or forward. */
+  const trackRow = (el: HTMLButtonElement, id: string, where: "list" | "detail") => {
     if (where === "detail") {
-      detailTwisty = el
+      detailRow = el
       onCleanup(() => {
-        if (detailTwisty === el) detailTwisty = undefined
+        if (detailRow === el) detailRow = undefined
       })
       return
     }
-    listTwisties.set(id, el)
+    listRows.set(id, el)
     onCleanup(() => {
       // A re-keyed row can mount its replacement before the old node runs cleanup; keep the newer ref.
-      if (listTwisties.get(id) === el) listTwisties.delete(id)
+      if (listRows.get(id) === el) listRows.delete(id)
     })
   }
 
-  /** Second row of a row: each token bucket. A run with nothing used yet shows one dash instead. */
-  const breakdown = (row: Row) => {
+  /** The three token buckets of a row plus their total. A run with nothing used yet shows one dash instead. */
+  const tokenGroups = (row: Row) => {
     const tokens = row.tokens
-    const empty =
-      tokens.input === 0 && tokens.output === 0 && tokens.cacheRead === 0 && tokens.cacheWrite === 0
-    if (empty && (row.status === "running" || row.pending)) return { text: "—", title: undefined }
+    const cache = tokens.cacheRead + tokens.cacheWrite
+    const total = tokens.input + tokens.output + cache
+    const empty = tokens.input === 0 && tokens.output === 0 && cache === 0
+    const input = formatTokens(tokens.input)
+    const output = formatTokens(tokens.output)
+    const cacheRead = formatTokens(tokens.cacheRead)
+    const cacheWrite = formatTokens(tokens.cacheWrite)
+    const sum = formatTokens(total)
     return {
-      text: ctx.t("row.breakdown", {
-        input: formatTokens(tokens.input),
-        output: formatTokens(tokens.output),
-        cache: formatTokens(tokens.cacheRead + tokens.cacheWrite),
-      }),
-      title: ctx.t("row.cacheDetail", {
-        read: formatTokens(tokens.cacheRead),
-        write: formatTokens(tokens.cacheWrite),
-      }),
+      dash: empty && (row.status === "running" || row.pending),
+      input,
+      output,
+      cacheRead,
+      cacheWrite,
+      total: sum,
+      aria: `${ctx.t("row.breakdown", { input, output, cache: formatTokens(cache) })} · ${ctx.t("footer.total")} ${sum}`,
+      inputAria: `${ctx.t("token.input")} ${input}`,
+      outputAria: `${ctx.t("token.output")} ${output}`,
+      cacheReadAria: `${ctx.t("token.cacheRead")} ${cacheRead}`,
+      cacheWriteAria: `${ctx.t("token.cacheWrite")} ${cacheWrite}`,
+      totalAria: `${ctx.t("footer.total")} ${sum}`,
     }
   }
 
-  // Shared by the list and the detail header: same twisty, same click target.
-  const rowLine = (row: () => Row, where: "list" | "detail") => (
-    <div class="sd-rowline">
-      <Show when={!row().missing || outputOpen(row().id)}>
+  // Shared by the list and the detail header: the row toggles the detail, the trailing button opens the chat.
+  const rowLine = (row: () => Row, where: "list" | "detail") => {
+    const groups = createMemo(() => tokenGroups(row()))
+    return (
+      <div class="sd-rowline">
         <button
           type="button"
-          class="sd-twisty"
-          ref={(el) => trackTwisty(el, row().id, where)}
-          aria-expanded={outputOpen(row().id)}
-          aria-controls={outputOpen(row().id) ? `sd-out-${row().id}` : undefined}
-          aria-label={ctx.t(outputOpen(row().id) ? "output.hide" : "output.show")}
-          onClick={() => toggleOutput(row().id)}
+          class="sd-row"
+          ref={(el) => trackRow(el, row().id, where)}
+          aria-expanded={where === "detail"}
+          classList={{
+            "sd-muted": row().missing,
+            "sd-pending": row().pending,
+            "sd-deep": row().depth > 0,
+          }}
+          style={{ "padding-left": `${8 + row().depth * 14}px` }}
+          disabled={row().missing && where !== "detail"}
+          aria-hidden={row().ellipsis ? "true" : undefined}
+          aria-label={
+            row().ellipsis
+              ? undefined
+              : `${row().agent ?? "—"} · ${row().title} · ${ctx.t(`status.${row().status}`)} · ${groups().aria}`
+          }
+          onClick={() => {
+            if (row().ellipsis) return
+            toggleOutput(row().id)
+          }}
         >
-          {outputOpen(row().id) ? "▾" : "▸"}
+          <Show when={!row().ellipsis} fallback={<span class="sd-title">…</span>}>
+            <span class={`sd-dot sd-dot-${row().status}`} />
+            <span class="sd-agent">{row().agent ?? "—"}</span>
+            {/* The full title stays in the row's aria-label; the visible one only ellipsizes. */}
+            <span class="sd-title">{row().title}</span>
+            <span class="sd-meta">
+              <Show when={!groups().dash} fallback={<span class="sd-tok">—</span>}>
+                <span class="sd-tok" role="img" aria-label={groups().inputAria}>
+                  <span class="sd-tok-icon" aria-hidden="true">↑</span>
+                  <span class="sd-tok-text">{groups().input}</span>
+                </span>
+                <span class="sd-tok" role="img" aria-label={groups().outputAria}>
+                  <span class="sd-tok-icon" aria-hidden="true">↓</span>
+                  <span class="sd-tok-text">{groups().output}</span>
+                </span>
+                <span class="sd-tok" role="img" aria-label={groups().cacheReadAria}>
+                  <span class="sd-tok-icon" aria-hidden="true">R</span>
+                  <span class="sd-tok-text">{groups().cacheRead}</span>
+                </span>
+                <span class="sd-tok" role="img" aria-label={groups().cacheWriteAria}>
+                  <span class="sd-tok-icon" aria-hidden="true">W</span>
+                  <span class="sd-tok-text">{groups().cacheWrite}</span>
+                </span>
+                <span class="sd-num" role="img" aria-label={groups().totalAria}>
+                  {groups().total}
+                </span>
+                <span class="sd-num">{rowCost(row())}</span>
+                <span class="sd-num sd-time">{rowTime(row(), now())}</span>
+              </Show>
+            </span>
+          </Show>
         </button>
-      </Show>
-      <button
-        type="button"
-        class="sd-row"
-        classList={{
-          "sd-muted": row().missing,
-          "sd-pending": row().pending,
-          "sd-deep": row().depth > 0,
-        }}
-        style={{ "padding-left": `${8 + row().depth * 14}px` }}
-        disabled={row().missing}
-        aria-hidden={row().ellipsis ? "true" : undefined}
-        aria-label={row().ellipsis ? undefined : `${row().agent ?? "—"} · ${row().title} · ${ctx.t(`status.${row().status}`)}`}
-        onClick={() => {
-          if (row().ellipsis) return
-          ctx.tabs.open({ server: props.session.server.id, id: row().id }, { focus: true })
-        }}
-      >
-        <Show when={!row().ellipsis} fallback={<span class="sd-title">…</span>}>
-          <span class={`sd-dot sd-dot-${row().status}`} title={ctx.t(`status.${row().status}`)} />
-          <span class="sd-agent">{row().agent ?? "—"}</span>
-          <span class="sd-title" title={row().title}>
-            {row().title}
-          </span>
-          <span class="sd-num">{rowTokens(row())}</span>
-          <span class="sd-num">{rowCost(row())}</span>
-          <span class="sd-num sd-time">{rowTime(row(), now())}</span>
-          <span class="sd-breakdown" title={breakdown(row()).title}>
-            {breakdown(row()).text}
-          </span>
+        <Show when={!row().ellipsis}>
+          <ctx.ui.Tooltip value={ctx.t("row.openChat")}>
+            <ctx.ui.IconButton
+              class="sd-open"
+              icon="square-arrow-top-right"
+              size="small"
+              variant="ghost-muted"
+              label={ctx.t("row.openChat")}
+              disabled={row().missing}
+              onClick={(event) => {
+                event.stopPropagation()
+                ctx.tabs.open({ server: props.session.server.id, id: row().id }, { focus: true })
+              }}
+            />
+          </ctx.ui.Tooltip>
         </Show>
-      </button>
-    </div>
-  )
+      </div>
+    )
+  }
 
   const rowView = (row: () => Row) => <div class="sd-item">{rowLine(row, "list")}</div>
 
@@ -420,12 +632,44 @@ export function DashboardView(props: { session: MountedSession }) {
               id={row().id}
               depth={row().depth}
               pending={pendingOutputs().has(row().id)}
+              tab={outputTab()}
+              onTab={setOutputTab}
             />
           </div>
         )}
       </Show>
       <Show when={count() > 0}>
-        <div class="sd-footer">{ctx.t("footer.summary", footer())}</div>
+        <div class="sd-footer" role="group" aria-label={ctx.t("footer.summary", footer())}>
+          <span>{ctx.t("footer.agents", { count: footer().count })}</span>
+          <span class="sd-footer-sep" aria-hidden="true">·</span>
+          <span class="sd-tok" role="img" aria-label={`${ctx.t("token.input")} ${footer().input}`}>
+            <span class="sd-tok-icon" aria-hidden="true">↑</span>
+            <span class="sd-tok-text">{footer().input}</span>
+          </span>
+          <span class="sd-footer-sep" aria-hidden="true">·</span>
+          <span class="sd-tok" role="img" aria-label={`${ctx.t("token.output")} ${footer().output}`}>
+            <span class="sd-tok-icon" aria-hidden="true">↓</span>
+            <span class="sd-tok-text">{footer().output}</span>
+          </span>
+          <span class="sd-footer-sep" aria-hidden="true">·</span>
+          <span class="sd-tok" role="img" aria-label={`${ctx.t("token.cacheRead")} ${footer().cacheRead}`}>
+            <span class="sd-tok-icon" aria-hidden="true">R</span>
+            <span class="sd-tok-text">{footer().cacheRead}</span>
+          </span>
+          <span class="sd-footer-sep" aria-hidden="true">·</span>
+          <span class="sd-tok" role="img" aria-label={`${ctx.t("token.cacheWrite")} ${footer().cacheWrite}`}>
+            <span class="sd-tok-icon" aria-hidden="true">W</span>
+            <span class="sd-tok-text">{footer().cacheWrite}</span>
+          </span>
+          <span class="sd-footer-sep" aria-hidden="true">·</span>
+          <span class="sd-tok" role="img" aria-label={`${ctx.t("footer.total")} ${footer().total}`}>
+            <span class="sd-tok-text">
+              {ctx.t("footer.total")} {footer().total}
+            </span>
+          </span>
+          <span class="sd-footer-sep" aria-hidden="true">·</span>
+          <span class="sd-num">{footer().cost}</span>
+        </div>
       </Show>
     </div>
   )
@@ -434,31 +678,41 @@ export function DashboardView(props: { session: MountedSession }) {
 export const panelCss = `
 .sd-root { box-sizing: border-box; height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 8px; overflow: hidden; font-size: 12px; }
 .sd-head { flex: none; }
-.sd-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.sd-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
 .sd-detail { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .sd-detail > .sd-rowline { flex: none; }
 .sd-empty { padding: 12px 8px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-list { display: flex; flex-direction: column; }
 .sd-item { display: block; }
-.sd-rowline { display: flex; align-items: center; gap: 2px; }
-.sd-twisty { all: unset; flex: none; box-sizing: border-box; width: 16px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; cursor: pointer; font-size: 10px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
-.sd-twisty:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
-.sd-twisty:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
-.sd-row { all: unset; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; box-sizing: border-box; flex: 1 1 auto; min-width: 0; min-height: 22px; padding: 2px 6px; border-radius: 4px; cursor: pointer; }
+.sd-rowline { display: flex; align-items: center; gap: 3px; }
+.sd-open { flex: none; }
+.sd-row { all: unset; display: flex; align-items: center; flex-wrap: nowrap; gap: 4px; box-sizing: border-box; flex: 1 1 auto; min-width: 0; min-height: 22px; padding: 2px 6px; border-radius: 4px; cursor: pointer; overflow: hidden; }
 .sd-row:hover:not(:disabled) { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
 .sd-row:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
 .sd-row:disabled { cursor: default; }
 .sd-deep { border-left: 1px solid var(--v2-border-border-base, rgba(127,127,127,.25)); }
 .sd-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--v2-text-text-faint, rgba(127,127,127,.7)); }
-.sd-dot-running { background: var(--v2-blue-600, #3b82f6); }
+.sd-dot-running { background: var(--v2-blue-600, #3b82f6); animation: sd-pulse 1.6s ease-in-out infinite; }
+@keyframes sd-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .sd-dot-running { animation: none; } }
 .sd-dot-succeeded { background: var(--v2-green-600, #30a46c); }
 .sd-dot-failed { background: var(--v2-red-600, #e5484d); }
 .sd-dot-interrupted { background: var(--v2-orange-600, #f76b15); }
-.sd-agent { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; border-radius: 3px; background: var(--v2-background-bg-muted, rgba(127,127,127,.12)); }
-.sd-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sd-num { flex: none; font-variant-numeric: tabular-nums; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
-.sd-time { min-width: 34px; text-align: right; }
-.sd-breakdown { flex: 1 0 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: -1px; font-size: 10px; font-variant-numeric: tabular-nums; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
+.sd-agent { flex: none; max-width: 14%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; border-radius: 3px; background: var(--v2-background-bg-muted, rgba(127,127,127,.12)); }
+.sd-title { display: block; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-meta { display: flex; align-items: baseline; gap: 3px; flex: none; margin-left: auto; white-space: nowrap; }
+/* Same line box height in every cell; the smaller token text is nudged down onto the numbers' baseline. */
+.sd-meta > * { line-height: 1.4; }
+.sd-num { flex: none; line-height: 1.4; font-variant-numeric: tabular-nums; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
+.sd-time { min-width: 22px; text-align: right; }
+.sd-tok { flex: none; display: inline-flex; align-items: baseline; gap: 2px; font-size: 10px; line-height: 1.4; transform: translateY(1px); font-variant-numeric: tabular-nums; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); white-space: nowrap; }
+.sd-tok-icon { flex: none; display: inline-flex; align-items: center; line-height: 1; }
+.sd-tok-text { flex: none; }
+.sd-tabs { flex: none; display: flex; gap: 2px; border-bottom: 1px solid var(--v2-border-border-base, rgba(127,127,127,.25)); }
+.sd-tab { all: unset; box-sizing: border-box; padding: 3px 8px; border-radius: 4px 4px 0 0; cursor: pointer; font-size: 11px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
+.sd-tab:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
+.sd-tab-active { color: var(--v2-text-text-base, inherit); background: var(--v2-background-bg-muted, rgba(127,127,127,.12)); }
+.sd-tab:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
 .sd-out { flex: 1 1 auto; min-height: 0; overflow: auto; box-sizing: border-box; margin: 0; padding: 6px 8px; border-radius: 4px; background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); font-size: 11px; }
 .sd-out-state { color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-group { all: unset; display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 11px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
@@ -468,7 +722,8 @@ export const panelCss = `
 .sd-more { all: unset; padding: 4px 6px; border-radius: 4px; cursor: pointer; color: var(--v2-blue-600, #3b82f6); }
 .sd-more:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
 .sd-more:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
-.sd-footer { flex: none; padding: 6px 2px 0; border-top: 1px solid var(--v2-border-border-base, rgba(127,127,127,.25)); color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
+.sd-footer { flex: none; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; padding: 6px 2px 0; border-top: 1px solid var(--v2-border-border-base, rgba(127,127,127,.25)); color: var(--v2-text-text-muted, rgba(127,127,127,.9)); font-size: 10px; }
+.sd-footer-sep { flex: none; }
 .sd-muted { opacity: .55; }
 .sd-pending { font-style: italic; opacity: .8; }
 `
