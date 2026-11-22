@@ -140,14 +140,8 @@ export function mergeBackground(
       pending: true,
     })
   }
-  // Ellipsis markers belong to their parent's subtree: sort the real rows first, then put each marker back after its parent.
-  const result = [...pending, ...sortRows(rows.filter((row) => !row.ellipsis))]
-  for (const row of rows) {
-    if (!row.ellipsis) continue
-    const index = result.findIndex((candidate) => candidate.id === row.parentID)
-    if (index >= 0) result.splice(index + 1, 0, row)
-  }
-  return result
+  // Keep `rows` in `buildTree`'s DFS order: a child must stay under its parent, and each level is already sorted.
+  return [...pending, ...rows]
 }
 
 export function formatTokens(n: number): string {
