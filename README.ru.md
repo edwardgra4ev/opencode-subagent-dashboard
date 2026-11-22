@@ -10,10 +10,6 @@
 
 English: [README.md](README.md).
 
-Закрывает запросы [anomalyco/opencode#57097](https://github.com/anomalyco/opencode/issues/57097) и
-[#12463](https://github.com/anomalyco/opencode/issues/12463) — панель статуса сабагентов в боковой
-панели. Только Desktop; TUI-версии по-прежнему нет.
-
 ![Панель: работающие и завершённые сабагенты с токенами, группа завершённых, деталь с вкладками Input и Output](docs/preview.gif)
 
 ## Требования
