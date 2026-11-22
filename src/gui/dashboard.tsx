@@ -1,5 +1,5 @@
 import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup } from "solid-js"
-import { createKeyed, createVisitState, usePlugin, type MountedSession } from "@opencode/plugin/gui"
+import { createKeyed, usePlugin, type MountedSession } from "@opencode/plugin/gui"
 import {
   formatCost,
   formatElapsed,
@@ -60,43 +60,84 @@ function OutputBlock(props: { data: SessionData; id: string; depth: number; pend
   )
 }
 
+type PanelState = {
+  activeOnly: boolean
+  finishedOpen: boolean | undefined
+  expanded: boolean
+  openOutput: string | undefined
+  scrollTop: number
+}
+
+/** Per-session view state, kept at module level so it survives the host remounting the panel on a tab switch. */
+const panelStates = new Map<string, PanelState>()
+
+function panelState(key: string): PanelState {
+  const found = panelStates.get(key)
+  if (found) return found
+  const created: PanelState = { activeOnly: false, finishedOpen: undefined, expanded: false, openOutput: undefined, scrollTop: 0 }
+  panelStates.set(key, created)
+  return created
+}
+
 export function DashboardView(props: { session: MountedSession }) {
   const ctx = usePlugin<typeof definition>()
   const [loading, setLoading] = createSignal(true)
   const [now, setNow] = createSignal(Date.now())
-  const [activeOnly, setActiveOnly] = createVisitState(false)
-  const [expanded, setExpanded] = createVisitState(false)
-  const [finishedOpen, setFinishedOpen] = createVisitState<boolean | undefined>(undefined)
+  const initial = panelState(props.session.key)
+  const [activeOnly, setActiveOnly] = createSignal(initial.activeOnly)
+  const [expanded, setExpanded] = createSignal(initial.expanded)
+  const [finishedOpen, setFinishedOpen] = createSignal<boolean | undefined>(initial.finishedOpen)
   // One output at a time: opening another row closes the previous one (accordion).
-  const [openOutput, setOpenOutput] = createSignal<string | undefined>(undefined)
+  const [openOutput, setOpenOutput] = createSignal<string | undefined>(initial.openOutput)
   const [pendingOutputs, setPendingOutputs] = createSignal<ReadonlySet<string>>(new Set<string>())
   // Sessions whose messages were already asked for; a failure drops the id so a later expansion retries.
   const outputRequests = new Set<string>()
 
   // The detail replaces the list, so the list's scroll and its twisties are parked here across the swap.
   let listScroll: HTMLDivElement | undefined
-  let listScrollTop = 0
   let detailTwisty: HTMLButtonElement | undefined
   const listTwisties = new Map<string, HTMLButtonElement>()
 
-  // Forget the panel's view state when the session changes, not only on a new visit after Home.
+  // The UI signals mirror the session's entry: written on every change, read back on mount and on key change.
+  // The key guard keeps a stale write from landing in the entry of a session the panel just switched to.
+  let persistedKey: string | undefined
+  createEffect(() => {
+    const values = {
+      activeOnly: activeOnly(),
+      finishedOpen: finishedOpen(),
+      expanded: expanded(),
+      openOutput: openOutput(),
+    }
+    const key = props.session.key
+    if (key !== persistedKey) {
+      persistedKey = key
+      return
+    }
+    const target = panelState(key)
+    target.activeOnly = values.activeOnly
+    target.finishedOpen = values.finishedOpen
+    target.expanded = values.expanded
+    target.openOutput = values.openOutput
+  })
+
+  // Only the load state and the output requests are per visit: the view state comes from the session's entry.
   createKeyed(
     () => props.session.key,
-    () =>
+    (key) => {
+      const state = panelState(key)
       batch(() => {
-        setActiveOnly(false)
-        setExpanded(false)
-        setFinishedOpen(undefined)
-        setOpenOutput(undefined)
+        setActiveOnly(state.activeOnly)
+        setExpanded(state.expanded)
+        setFinishedOpen(state.finishedOpen)
+        setOpenOutput(state.openOutput)
         setPendingOutputs(new Set<string>())
         outputRequests.clear()
-        // Another session opens at the top: forget the parked offset and move the live container there too.
-        // A detail open at the switch closes in the same batch, so the list is mounted again by the microtask.
-        listScrollTop = 0
-        queueMicrotask(() => {
-          if (listScroll) listScroll.scrollTop = 0
-        })
-      }),
+      })
+      // The list may be unmounted here (a detail is open): the restoring read after the swap uses the entry too.
+      queueMicrotask(() => {
+        if (listScroll) listScroll.scrollTop = state.scrollTop
+      })
+    },
   )
 
   // A sync of the previous session must not clear this one's loading state or raise its toast.
@@ -221,13 +262,13 @@ export function DashboardView(props: { session: MountedSession }) {
       setOpenOutput(undefined)
       // Solid swaps the views synchronously, so the list's refs are live by this microtask.
       queueMicrotask(() => {
-        if (listScroll) listScroll.scrollTop = listScrollTop
+        if (listScroll) listScroll.scrollTop = panelState(props.session.key).scrollTop
         // A row that dropped out of the list has no twisty: leave the focus where it is.
         listTwisties.get(id)?.focus({ preventScroll: true })
       })
       return
     }
-    listScrollTop = listScroll?.scrollTop ?? 0
+    panelState(props.session.key).scrollTop = listScroll?.scrollTop ?? 0
     setOpenOutput(id)
     requestOutput(id)
     queueMicrotask(() => detailTwisty?.focus())
@@ -309,7 +350,13 @@ export function DashboardView(props: { session: MountedSession }) {
                 <ctx.ui.Switch label={ctx.t("filter.active")} checked={activeOnly()} onChange={setActiveOnly} />
               </div>
             </Show>
-            <div class="sd-scroll" ref={(el) => (listScroll = el)}>
+            <div
+              class="sd-scroll"
+              ref={(el) => (listScroll = el)}
+              onScroll={(event) => {
+                panelState(props.session.key).scrollTop = event.currentTarget.scrollTop
+              }}
+            >
               <Show
                 when={count() > 0}
                 fallback={<div class="sd-empty">{ctx.t(loading() ? "state.loading" : "state.empty")}</div>}
