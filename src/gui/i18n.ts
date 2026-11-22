@@ -17,6 +17,10 @@ export const en = {
   "status.idle": "Idle",
   "badge.label": "{{count}} running subagents",
   "notify.done": "Subagent finished: {{title}}",
+  "output.show": "Show last output",
+  "output.hide": "Hide output",
+  "output.empty": "No output yet",
+  "output.loading": "Loading output…",
 }
 
 export const ru = {
@@ -38,4 +42,8 @@ export const ru = {
   "status.idle": "Простаивает",
   "badge.label": "{{count}} сабагентов выполняется",
   "notify.done": "Сабагент завершён: {{title}}",
+  "output.show": "Показать последний вывод",
+  "output.hide": "Скрыть вывод",
+  "output.empty": "Вывода пока нет",
+  "output.loading": "Загрузка вывода…",
 }

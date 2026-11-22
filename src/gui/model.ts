@@ -2,6 +2,8 @@ import type { ServerRef } from "@opencode/plugin/gui"
 
 export type SessionInfo = ReturnType<ServerRef["data"]["session"]["list"]>[number]
 
+export type SessionMessageInfo = ReturnType<ServerRef["data"]["session"]["message"]["list"]>[number]
+
 export type AgentStatus = "running" | "succeeded" | "failed" | "interrupted" | "idle"
 
 export type Row = {
@@ -142,6 +144,21 @@ export function mergeBackground(
   }
   // Keep `rows` in `buildTree`'s DFS order: a child must stay under its parent, and each level is already sorted.
   return [...pending, ...rows]
+}
+
+/** The text of the last assistant message: its `text` parts joined, reasoning and tool calls skipped. */
+export function lastAssistantText(messages: readonly SessionMessageInfo[]): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    if (!message || message.type !== "assistant") continue
+    const text = message.content
+      .filter((part) => part.type === "text")
+      .map((part) => part.text)
+      .join("\n\n")
+      .trim()
+    return text || undefined
+  }
+  return undefined
 }
 
 export function formatTokens(n: number): string {
