@@ -67,7 +67,8 @@ export function DashboardView(props: { session: MountedSession }) {
   const [activeOnly, setActiveOnly] = createVisitState(false)
   const [expanded, setExpanded] = createVisitState(false)
   const [finishedOpen, setFinishedOpen] = createVisitState<boolean | undefined>(undefined)
-  const [openOutputs, setOpenOutputs] = createSignal<ReadonlySet<string>>(new Set<string>())
+  // One output at a time: opening another row closes the previous one (accordion).
+  const [openOutput, setOpenOutput] = createSignal<string | undefined>(undefined)
   const [pendingOutputs, setPendingOutputs] = createSignal<ReadonlySet<string>>(new Set<string>())
   // Sessions whose messages were already asked for; a failure drops the id so a later expansion retries.
   const outputRequests = new Set<string>()
@@ -80,7 +81,7 @@ export function DashboardView(props: { session: MountedSession }) {
         setActiveOnly(false)
         setExpanded(false)
         setFinishedOpen(undefined)
-        setOpenOutputs(new Set<string>())
+        setOpenOutput(undefined)
         setPendingOutputs(new Set<string>())
         outputRequests.clear()
       }),
@@ -172,7 +173,7 @@ export function DashboardView(props: { session: MountedSession }) {
   // The header stays whenever the finished group exists, even while the list is truncated.
   const finishedGroup = () => !activeOnly() && finishedCount() > 0
 
-  const outputOpen = (id: string) => openOutputs().has(id)
+  const outputOpen = (id: string) => openOutput() === id
 
   const requestOutput = (id: string) => {
     const messages = props.session.server.data.session.message
@@ -193,58 +194,60 @@ export function DashboardView(props: { session: MountedSession }) {
   }
 
   const toggleOutput = (id: string) => {
-    if (openOutputs().has(id)) {
-      const next = new Set(openOutputs())
-      next.delete(id)
-      setOpenOutputs(next)
+    if (openOutput() === id) {
+      setOpenOutput(undefined)
       return
     }
-    setOpenOutputs(new Set(openOutputs()).add(id))
+    setOpenOutput(id)
     requestOutput(id)
   }
 
   const rowView = (row: () => Row) => (
-    <div class="sd-item">
-      <Show when={!row().missing}>
+    // The row line is separate from the output so `position: sticky` keeps the row pinned
+    // while its own output scrolls inside `.sd-scroll`.
+    <div class="sd-item" classList={{ "sd-open": outputOpen(row().id) }}>
+      <div class="sd-rowline">
+        <Show when={!row().missing}>
+          <button
+            type="button"
+            class="sd-twisty"
+            aria-expanded={outputOpen(row().id)}
+            aria-controls={outputOpen(row().id) ? `sd-out-${row().id}` : undefined}
+            aria-label={ctx.t(outputOpen(row().id) ? "output.hide" : "output.show")}
+            onClick={() => toggleOutput(row().id)}
+          >
+            {outputOpen(row().id) ? "▾" : "▸"}
+          </button>
+        </Show>
         <button
           type="button"
-          class="sd-twisty"
-          aria-expanded={outputOpen(row().id)}
-          aria-controls={`sd-out-${row().id}`}
-          aria-label={ctx.t(outputOpen(row().id) ? "output.hide" : "output.show")}
-          onClick={() => toggleOutput(row().id)}
+          class="sd-row"
+          classList={{
+            "sd-muted": row().missing,
+            "sd-pending": row().pending,
+            "sd-deep": row().depth > 0,
+          }}
+          style={{ "padding-left": `${8 + row().depth * 14}px` }}
+          disabled={row().missing}
+          aria-hidden={row().ellipsis ? "true" : undefined}
+          aria-label={row().ellipsis ? undefined : `${row().agent ?? "—"} · ${row().title} · ${ctx.t(`status.${row().status}`)}`}
+          onClick={() => {
+            if (row().ellipsis) return
+            ctx.tabs.open({ server: props.session.server.id, id: row().id }, { focus: true })
+          }}
         >
-          {outputOpen(row().id) ? "▾" : "▸"}
+          <Show when={!row().ellipsis} fallback={<span class="sd-title">…</span>}>
+            <span class={`sd-dot sd-dot-${row().status}`} title={ctx.t(`status.${row().status}`)} />
+            <span class="sd-agent">{row().agent ?? "—"}</span>
+            <span class="sd-title" title={row().title}>
+              {row().title}
+            </span>
+            <span class="sd-num">{rowTokens(row())}</span>
+            <span class="sd-num">{rowCost(row())}</span>
+            <span class="sd-num sd-time">{rowTime(row(), now())}</span>
+          </Show>
         </button>
-      </Show>
-      <button
-        type="button"
-        class="sd-row"
-        classList={{
-          "sd-muted": row().missing,
-          "sd-pending": row().pending,
-          "sd-deep": row().depth > 0,
-        }}
-        style={{ "padding-left": `${8 + row().depth * 14}px` }}
-        disabled={row().missing}
-        aria-hidden={row().ellipsis ? "true" : undefined}
-        aria-label={row().ellipsis ? undefined : `${row().agent ?? "—"} · ${row().title} · ${ctx.t(`status.${row().status}`)}`}
-        onClick={() => {
-          if (row().ellipsis) return
-          ctx.tabs.open({ server: props.session.server.id, id: row().id }, { focus: true })
-        }}
-      >
-        <Show when={!row().ellipsis} fallback={<span class="sd-title">…</span>}>
-          <span class={`sd-dot sd-dot-${row().status}`} title={ctx.t(`status.${row().status}`)} />
-          <span class="sd-agent">{row().agent ?? "—"}</span>
-          <span class="sd-title" title={row().title}>
-            {row().title}
-          </span>
-          <span class="sd-num">{rowTokens(row())}</span>
-          <span class="sd-num">{rowCost(row())}</span>
-          <span class="sd-num sd-time">{rowTime(row(), now())}</span>
-        </Show>
-      </button>
+      </div>
       <Show when={outputOpen(row().id) && !row().missing}>
         <OutputBlock
           data={props.session.server.data.session}
@@ -302,7 +305,9 @@ export const panelCss = `
 .sd-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
 .sd-empty { padding: 12px 8px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-list { display: flex; flex-direction: column; }
-.sd-item { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.sd-item { display: block; }
+.sd-rowline { display: flex; align-items: center; gap: 2px; }
+.sd-open > .sd-rowline { position: sticky; top: 0; z-index: 2; background: var(--v2-background-bg-base, #1b1b1b); border-bottom: 1px solid var(--v2-border-border-base, rgba(127,127,127,.25)); }
 .sd-twisty { all: unset; flex: none; box-sizing: border-box; width: 16px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; cursor: pointer; font-size: 10px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-twisty:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
 .sd-twisty:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
@@ -320,7 +325,7 @@ export const panelCss = `
 .sd-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sd-num { flex: none; font-variant-numeric: tabular-nums; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-time { min-width: 34px; text-align: right; }
-.sd-out { flex: 1 0 100%; box-sizing: border-box; margin: 0 0 2px; padding: 6px 8px; border-radius: 4px; background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); font-size: 11px; max-height: 240px; overflow: auto; }
+.sd-out { box-sizing: border-box; margin: 0 0 2px; padding: 6px 8px; border-radius: 4px; background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); font-size: 11px; }
 .sd-out-state { color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-group { all: unset; display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 11px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-group:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
