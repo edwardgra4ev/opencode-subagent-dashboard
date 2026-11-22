@@ -174,6 +174,16 @@ export function DashboardView(props: { session: MountedSession }) {
   const finishedGroup = () => !activeOnly() && finishedCount() > 0
 
   const outputOpen = (id: string) => openOutput() === id
+  // The open output replaces the list; a gone row (deleted session) falls back to the list.
+  const detail = createMemo(() => {
+    const id = openOutput()
+    return id === undefined ? undefined : byId().get(id)
+  })
+
+  createEffect(() => {
+    const id = openOutput()
+    if (id !== undefined && !byId().has(id)) setOpenOutput(undefined)
+  })
 
   const requestOutput = (id: string) => {
     const messages = props.session.server.data.session.message
@@ -202,96 +212,109 @@ export function DashboardView(props: { session: MountedSession }) {
     requestOutput(id)
   }
 
-  const rowView = (row: () => Row) => (
-    // The row line is separate from the output so `position: sticky` keeps the row pinned
-    // while its own output scrolls inside `.sd-scroll`.
-    <div class="sd-item" classList={{ "sd-open": outputOpen(row().id) }}>
-      <div class="sd-rowline">
-        <Show when={!row().missing}>
-          <button
-            type="button"
-            class="sd-twisty"
-            aria-expanded={outputOpen(row().id)}
-            aria-controls={outputOpen(row().id) ? `sd-out-${row().id}` : undefined}
-            aria-label={ctx.t(outputOpen(row().id) ? "output.hide" : "output.show")}
-            onClick={() => toggleOutput(row().id)}
-          >
-            {outputOpen(row().id) ? "▾" : "▸"}
-          </button>
-        </Show>
+  // Shared by the list and the detail header: same twisty, same click target.
+  const rowLine = (row: () => Row) => (
+    <div class="sd-rowline">
+      <Show when={!row().missing || outputOpen(row().id)}>
         <button
           type="button"
-          class="sd-row"
-          classList={{
-            "sd-muted": row().missing,
-            "sd-pending": row().pending,
-            "sd-deep": row().depth > 0,
-          }}
-          style={{ "padding-left": `${8 + row().depth * 14}px` }}
-          disabled={row().missing}
-          aria-hidden={row().ellipsis ? "true" : undefined}
-          aria-label={row().ellipsis ? undefined : `${row().agent ?? "—"} · ${row().title} · ${ctx.t(`status.${row().status}`)}`}
-          onClick={() => {
-            if (row().ellipsis) return
-            ctx.tabs.open({ server: props.session.server.id, id: row().id }, { focus: true })
-          }}
+          class="sd-twisty"
+          aria-expanded={outputOpen(row().id)}
+          aria-controls={outputOpen(row().id) ? `sd-out-${row().id}` : undefined}
+          aria-label={ctx.t(outputOpen(row().id) ? "output.hide" : "output.show")}
+          onClick={() => toggleOutput(row().id)}
         >
-          <Show when={!row().ellipsis} fallback={<span class="sd-title">…</span>}>
-            <span class={`sd-dot sd-dot-${row().status}`} title={ctx.t(`status.${row().status}`)} />
-            <span class="sd-agent">{row().agent ?? "—"}</span>
-            <span class="sd-title" title={row().title}>
-              {row().title}
-            </span>
-            <span class="sd-num">{rowTokens(row())}</span>
-            <span class="sd-num">{rowCost(row())}</span>
-            <span class="sd-num sd-time">{rowTime(row(), now())}</span>
-          </Show>
+          {outputOpen(row().id) ? "▾" : "▸"}
         </button>
-      </div>
-      <Show when={outputOpen(row().id) && !row().missing}>
-        <OutputBlock
-          data={props.session.server.data.session}
-          id={row().id}
-          depth={row().depth}
-          pending={pendingOutputs().has(row().id)}
-        />
       </Show>
+      <button
+        type="button"
+        class="sd-row"
+        classList={{
+          "sd-muted": row().missing,
+          "sd-pending": row().pending,
+          "sd-deep": row().depth > 0,
+        }}
+        style={{ "padding-left": `${8 + row().depth * 14}px` }}
+        disabled={row().missing}
+        aria-hidden={row().ellipsis ? "true" : undefined}
+        aria-label={row().ellipsis ? undefined : `${row().agent ?? "—"} · ${row().title} · ${ctx.t(`status.${row().status}`)}`}
+        onClick={() => {
+          if (row().ellipsis) return
+          ctx.tabs.open({ server: props.session.server.id, id: row().id }, { focus: true })
+        }}
+      >
+        <Show when={!row().ellipsis} fallback={<span class="sd-title">…</span>}>
+          <span class={`sd-dot sd-dot-${row().status}`} title={ctx.t(`status.${row().status}`)} />
+          <span class="sd-agent">{row().agent ?? "—"}</span>
+          <span class="sd-title" title={row().title}>
+            {row().title}
+          </span>
+          <span class="sd-num">{rowTokens(row())}</span>
+          <span class="sd-num">{rowCost(row())}</span>
+          <span class="sd-num sd-time">{rowTime(row(), now())}</span>
+        </Show>
+      </button>
     </div>
   )
 
+  const rowView = (row: () => Row) => <div class="sd-item">{rowLine(row)}</div>
+
   return (
     <div class="sd-root">
-      <Show when={count() > 0}>
-        <div class="sd-head">
-          <ctx.ui.Switch label={ctx.t("filter.active")} checked={activeOnly()} onChange={setActiveOnly} />
-        </div>
-      </Show>
-      <div class="sd-scroll">
-        <Show when={count() > 0} fallback={<div class="sd-empty">{ctx.t(loading() ? "state.loading" : "state.empty")}</div>}>
-          <Show when={!activeOnly() || activeCount() > 0} fallback={<div class="sd-empty">{ctx.t("filter.empty")}</div>}>
-            <div class="sd-list">
-              <For each={activeIds()}>{(id) => rowView(() => byId().get(id)!)}</For>
-              <Show when={finishedGroup()}>
-                <button
-                  type="button"
-                  class="sd-group"
-                  aria-expanded={finishedExpanded()}
-                  onClick={() => setFinishedOpen(!finishedExpanded())}
-                >
-                  <span class="sd-caret">{finishedExpanded() ? "▾" : "▸"}</span>
-                  {ctx.t("group.finished", { count: finishedCount() })}
-                </button>
-              </Show>
-              <For each={finishedIds()}>{(id) => rowView(() => byId().get(id)!)}</For>
-              <Show when={more() > 0}>
-                <button type="button" class="sd-more" onClick={() => setExpanded(true)}>
-                  {ctx.t("state.more", { count: more() })}
-                </button>
+      <Show
+        when={detail()}
+        fallback={
+          <>
+            <Show when={count() > 0}>
+              <div class="sd-head">
+                <ctx.ui.Switch label={ctx.t("filter.active")} checked={activeOnly()} onChange={setActiveOnly} />
+              </div>
+            </Show>
+            <div class="sd-scroll">
+              <Show
+                when={count() > 0}
+                fallback={<div class="sd-empty">{ctx.t(loading() ? "state.loading" : "state.empty")}</div>}
+              >
+                <Show when={!activeOnly() || activeCount() > 0} fallback={<div class="sd-empty">{ctx.t("filter.empty")}</div>}>
+                  <div class="sd-list">
+                    <For each={activeIds()}>{(id) => rowView(() => byId().get(id)!)}</For>
+                    <Show when={finishedGroup()}>
+                      <button
+                        type="button"
+                        class="sd-group"
+                        aria-expanded={finishedExpanded()}
+                        onClick={() => setFinishedOpen(!finishedExpanded())}
+                      >
+                        <span class="sd-caret">{finishedExpanded() ? "▾" : "▸"}</span>
+                        {ctx.t("group.finished", { count: finishedCount() })}
+                      </button>
+                    </Show>
+                    <For each={finishedIds()}>{(id) => rowView(() => byId().get(id)!)}</For>
+                    <Show when={more() > 0}>
+                      <button type="button" class="sd-more" onClick={() => setExpanded(true)}>
+                        {ctx.t("state.more", { count: more() })}
+                      </button>
+                    </Show>
+                  </div>
+                </Show>
               </Show>
             </div>
-          </Show>
-        </Show>
-      </div>
+          </>
+        }
+      >
+        {(row) => (
+          <div class="sd-detail">
+            {rowLine(row)}
+            <OutputBlock
+              data={props.session.server.data.session}
+              id={row().id}
+              depth={row().depth}
+              pending={pendingOutputs().has(row().id)}
+            />
+          </div>
+        )}
+      </Show>
       <Show when={count() > 0}>
         <div class="sd-footer">{ctx.t("footer.summary", footer())}</div>
       </Show>
@@ -303,11 +326,12 @@ export const panelCss = `
 .sd-root { box-sizing: border-box; height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 8px; overflow: hidden; font-size: 12px; }
 .sd-head { flex: none; }
 .sd-scroll { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.sd-detail { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.sd-detail > .sd-rowline { flex: none; }
 .sd-empty { padding: 12px 8px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-list { display: flex; flex-direction: column; }
 .sd-item { display: block; }
 .sd-rowline { display: flex; align-items: center; gap: 2px; }
-.sd-open > .sd-rowline { position: sticky; top: 0; z-index: 2; background: var(--v2-background-bg-base, #1b1b1b); border-bottom: 1px solid var(--v2-border-border-base, rgba(127,127,127,.25)); }
 .sd-twisty { all: unset; flex: none; box-sizing: border-box; width: 16px; height: 18px; display: inline-flex; align-items: center; justify-content: center; border-radius: 3px; cursor: pointer; font-size: 10px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-twisty:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
 .sd-twisty:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
@@ -325,7 +349,7 @@ export const panelCss = `
 .sd-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sd-num { flex: none; font-variant-numeric: tabular-nums; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-time { min-width: 34px; text-align: right; }
-.sd-out { box-sizing: border-box; margin: 0 0 2px; padding: 6px 8px; border-radius: 4px; background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); font-size: 11px; }
+.sd-out { flex: 1 1 auto; min-height: 0; overflow: auto; box-sizing: border-box; margin: 0; padding: 6px 8px; border-radius: 4px; background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); font-size: 11px; }
 .sd-out-state { color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-group { all: unset; display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 11px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-group:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
