@@ -4,6 +4,19 @@ All notable changes to this plugin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions use
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Inline reasoning preview under a running subagent's row: the last five reasoning blocks, oldest
+  first, each collapsed to a `▸` line with a one-line preview that expands in place and scrolls
+  inside a 240px-tall body. Only running rows show it; it disappears when the subagent finishes.
+- `Reasoning` tab in the detail, between **Input** and **Output**: every reasoning block of the
+  subagent as the same collapsible blocks, loading older history like the Input tab, with
+  `Loading reasoning…`, `No reasoning recorded` and an inline error retried by clicking the tab.
+- `←`/`→` cycle the three tabs and `Home`/`End` jump to Input and Output; the detail's tab strip
+  and scrolling area take keyboard focus and show a focus ring.
+
 ## [0.1.1] - 2026-11-22
 
 ### Fixed

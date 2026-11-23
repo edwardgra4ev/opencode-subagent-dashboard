@@ -10,7 +10,7 @@ that subagent's chat in a new tab. While subagents run, the panel's tab title sh
 
 Russian version: [README.ru.md](README.ru.md).
 
-![The panel: running and finished subagents with their tokens, the finished group, and a detail with Input and Output tabs](docs/preview.gif)
+![The panel: running and finished subagents with their tokens, the finished group, and a detail with Input, Reasoning and Output tabs](docs/preview.gif)
 
 ## Requirements
 
@@ -113,6 +113,11 @@ Statuses and dot colors:
 
 A running dot pulses; with `prefers-reduced-motion: reduce` the animation is off.
 
+**Reasoning while it runs.** Under a running row the panel shows what that subagent is thinking:
+the last five reasoning blocks, oldest first, each collapsed to a `▸` line with a one-line
+preview. Click a line to expand it; a long block scrolls inside itself. The preview disappears
+when the subagent finishes - the **Reasoning** tab in the detail keeps it.
+
 **Empty usage.** A still-running subagent with no usage events yet shows one `—` instead of the
 buckets, the total, the cost and the time, rather than zeros. Amounts format as `812`, `12.3k`,
 `1.2M`; a total of `input + output + read + write`; cost below one cent shows `<$0.01`.
@@ -126,20 +131,26 @@ to the list (see below). The arrow button at the right edge of the row, tooltip 
 opens that subagent's session in a new tab. Rows of sessions that no longer exist (`missing`,
 for example after a deletion) are dimmed and disabled, so neither action is available.
 
-**Detail.** The detail replaces the list: the agent's row stays pinned at the top and gets two
-tabs, **Input** and **Output**. **Input** is the task the subagent was given - the first user
-message with text; **Output** is the last text its assistant wrote. Both are rendered as
-markdown by Desktop: headings, lists, tables, code with highlighting and a copy button, links.
-Reasoning and tool calls are not shown. The output fills the remaining height of the panel and
-scrolls inside it; the footer stays. Switch tabs with the mouse or with `←`/`→`; `Home` and
-`End` jump to Input and Output. The detail always opens on **Output**, one detail is open at a
-time, and opening another row replaces it.
+**Detail.** The detail replaces the list: the agent's row stays pinned at the top and gets three
+tabs, **Input**, **Reasoning** and **Output**. **Input** is the task the subagent was given - the
+first user message with text; **Reasoning** holds the subagent's reasoning blocks from the history
+the panel has loaded, oldest first, each collapsed to a `▸` line with a one-line preview that
+expands on click; **Output** is the last text its assistant wrote. Input and Output are rendered
+as markdown by Desktop: headings, lists, tables, code with highlighting and a copy button, links.
+Tool calls are not shown. The output fills the remaining height of the panel and scrolls inside
+it; the footer stays. Switch tabs with the mouse or with `←`/`→`; `Home` and `End` jump to Input
+and Output. The tabs and the scrolling area below them take keyboard focus and show a focus ring.
+The detail always opens on **Output**, one detail is open at a time, and opening another row
+replaces it.
 
 The detail is fetched the first time you open it: `Loading output…` until the messages arrive.
 An empty Output tab reads `No output yet`; the Input tab reads `No prompt recorded` once the
-session's history is fully loaded. Older messages are loaded on the first open of the Input tab,
-so it can show `Loading output…` while the prompt is still being fetched. If that load fails the
-tab shows `Could not load the output: …`, and clicking **Input** again retries.
+session's history is fully loaded; the Reasoning tab reads `No reasoning recorded` when the
+history holds no reasoning and `Loading reasoning…` until the history has settled. Older
+messages are loaded on the first open of the **Input** or **Reasoning** tab, at most twice per
+open, so the Input tab can show `Loading output…` and the Reasoning tab `Loading reasoning…`
+while older messages arrive. If that load fails the tab shows `Could not load the output: …`,
+and clicking the same tab again retries.
 
 **Filter.** **Only active** hides finished subagents and the finished group. It appears once the
 session has subagents.
@@ -175,9 +186,12 @@ state.
 - Only subagents of the current session are listed; other tabs' sessions are not.
 - Tree depth is capped at 3; deeper subagents show as `…`.
 - At most 200 rows render before `+N more`.
-- The Output tab holds only the last assistant text: reasoning, tool calls and earlier turns
-  are left out. The Input tab holds only the first user message; later steering messages are
-  not part of it.
+- The Output tab holds only the last assistant text: tool calls and earlier turns are left out;
+  reasoning has its own tab. The Input tab holds only the first user message; later steering
+  messages are not part of it.
+- The inline reasoning preview under a running row shows at most the newest five blocks, from
+  the message window the panel has already synced: one sync per running row, no older reasoning.
+  The Reasoning tab loads older history instead, at most twice per open.
 - A `missing` row is dimmed and disabled, so its detail cannot be opened.
 - One detail is open at a time. Each session remembers its own open detail and list position,
   but the detail always reopens on the Output tab.
@@ -209,14 +223,14 @@ Structure:
 | --- | --- |
 | `src/index.ts` | server half: `Plugin.define({ id: "subagent-dashboard" })`, no handlers |
 | `src/gui.tsx` | GUI entry: panel, pinning, `+` menu item, `/agents` command, running count in the tab title, completion notifications, styles |
-| `src/gui/dashboard.tsx` | the panel: rows, chat button, detail with Input/Output tabs, filter, finished group, row limit, footer, per-session view state |
-| `src/gui/model.ts` | pure model: tree, ordering, background merge, `lastAssistantText`, `userPromptText`, formatters |
+| `src/gui/dashboard.tsx` | the panel: rows, inline reasoning preview, chat button, detail with Input/Reasoning/Output tabs, filter, finished group, row limit, footer, per-session view state |
+| `src/gui/model.ts` | pure model: tree, ordering, background merge, `lastAssistantText`, `userPromptText`, `reasoningBlocks`, formatters |
 | `src/gui/definition.ts` | plugin definition with the en/ru dictionaries |
 | `src/gui/i18n.ts` | English and Russian copy |
 
 Opening a detail syncs that session's messages (`message.sync`), so a session that is also open
-in a chat tab may re-read its message window. Loading the Input tab fetches the session's older
-messages the same way.
+in a chat tab may re-read its message window. Loading the Input or Reasoning tab fetches the
+session's older messages the same way.
 
 The animation at the top of this file is a mock of the panel, generated from `docs/preview.html`:
 open it for a live loop, or render one moment with `?frame=1&t=8.2` and capture the 900×520
