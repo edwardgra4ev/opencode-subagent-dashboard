@@ -33,6 +33,29 @@ OpenCode Desktop GUI plugin: side panel `agents` listing subagents of the curren
 7. [done] Docs (README/README.ru/CHANGELOG/LICENSE, `9ee35f0`), release metadata + committed bundle (`dc1aa01`).
    Note: docs commit came before metadata commit in history; `dist/` matches current `src` (build clean).
 
+## Current task: reasoning blocks (branch `feat/reasoning-blocks`)
+User request: show the model's reasoning (thinking parts) per subagent, as an expandable list under the row,
+on a separate branch so it can be reverted.
+
+Final shape (after several user clarifications; earlier iterations removed):
+- INLINE preview under RUNNING list rows: the last 5 reasoning blocks, collapsed `<details>` each
+  (`▸` 8px caret + 4px gap, text at 12px, body at 12px = 11px margin + 1px border, 4px between blocks,
+  body scrolls at 240px, pre-wrap). No toggle button, no per-session open state, no `+N more`, no error/toast.
+  One silent `message.sync` per running row (skipped for `pending` stubs and rows whose messages are loaded).
+  Panel is a sibling of `.sd-rowline` inside `.sd-item`, indented `20 + depth*14` px, no background.
+- DETAIL tab: three tabs in order `Input | Reasoning | Output`; the Reasoning tab shows ALL blocks with
+  history loading (one sync + up to two `loadMore(all)` loads, inline error with retry via tab click),
+  `Loading reasoning…` / `No reasoning recorded`. List mounts only when history is settled so a prepend
+  cannot rebind an open `<details>`. `←`/`→` wrap, `Home`/`End` = first/last; both the tabpanel and
+  `.sd-reason-text` are focusable with a focus ring.
+- Data: `SessionMessageAssistant.content` parts with `type: "reasoning"`; `reasoningBlocks(messages)` in
+  `src/gui/model.ts` re-reads `part.text` every call (no identity cache — the store mutates in place).
+- Not in scope: agent name и todos из первого вопроса (у todos нет API, только парсинг `todowrite`).
+- Docs: README.md / README.ru.md / docs/preview.html / CHANGELOG `Unreleased` updated by `docs`; preview.gif
+  regeneration needs a capture pass.
+
+Uncommitted foreign change: `.github/workflows/release.yml` (must not be touched or committed by us).
+
 ## Status
 0.1.0 released: `main` at `3f16b5e`, tag `v0.1.0` pushed. Active bugfix branch `fix/sidebar-width-sync`,
 uncommitted; runtime behaviour after the panel-id change is not verified yet.
