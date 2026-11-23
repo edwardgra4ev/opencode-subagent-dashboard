@@ -1,6 +1,6 @@
 {
   "name": "opencode-subagent-dashboard",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "OpenCode Desktop GUI plugin: side panel with subagents of the current session",
   "private": true,
   "type": "module",
