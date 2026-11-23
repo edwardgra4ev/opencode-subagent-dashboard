@@ -166,6 +166,21 @@ export function lastAssistantText(messages: readonly SessionMessageInfo[]): stri
   return undefined
 }
 
+/** Every reasoning part of the assistant messages, in the order the model produced them. */
+export function reasoningBlocks(messages: readonly SessionMessageInfo[]): string[] {
+  const blocks: string[] = []
+  for (const message of messages) {
+    if (message.type !== "assistant") continue
+    for (const part of message.content) {
+      if (part.type !== "reasoning") continue
+      // A part's text changes in place while it streams, so it must be read on every call, never cached by identity.
+      const text = part.text.trim()
+      if (text) blocks.push(text)
+    }
+  }
+  return blocks
+}
+
 /** The task the agent was given: the first user message with text. Later steering messages are not part of it. */
 export function userPromptText(messages: readonly SessionMessageInfo[]): string | undefined {
   for (const message of messages) {

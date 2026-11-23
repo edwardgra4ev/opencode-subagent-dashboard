@@ -1,10 +1,11 @@
-import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js"
+import { For, Index, Show, batch, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js"
 import { createKeyed, usePlugin, type MountedSession } from "@opencode/plugin/gui"
 import {
   formatCost,
   formatElapsed,
   formatTokens,
   lastAssistantText,
+  reasoningBlocks,
   userPromptText,
   visibleRows,
   type Row,
@@ -34,10 +35,17 @@ function rowCost(row: Row): string {
   return row.status === "running" && row.cost === 0 ? "—" : formatCost(row.cost)
 }
 
-/** The two views of a subagent's transcript. */
-type OutputTab = "input" | "output"
+/** First line of a reasoning part, cut to fit a collapsed block's summary. */
+function reasoningSummary(text: string): string {
+  const nl = text.indexOf("\n")
+  const line = (nl < 0 ? text : text.slice(0, nl)).trim()
+  return line.length > 90 ? `${line.slice(0, 90)}…` : line
+}
 
-/** A subagent's prompt and last assistant text, loaded on first expansion, in two tabs. */
+/** The three views of a subagent's transcript. */
+type OutputTab = "input" | "output" | "reasoning"
+
+/** A subagent's prompt, reasoning blocks and last assistant text, loaded on first expansion, in three tabs. */
 function OutputBlock(props: {
   data: SessionData
   id: string
@@ -50,13 +58,16 @@ function OutputBlock(props: {
   const messages = createMemo(() => props.data.message.list(props.id))
   const input = createMemo(() => userPromptText(messages()))
   const output = createMemo(() => lastAssistantText(messages()))
+  const blocks = createMemo(() => reasoningBlocks(messages()))
   const loading = () => props.data.message.loading(props.id)
   const more = () => props.data.message.more(props.id)
   // Own request state: the store's `loading` may stay false while `loadMore` runs, and a failure must be visible.
   const [busy, setBusy] = createSignal(false)
-  const [inputError, setInputError] = createSignal<string | undefined>()
+  const [loadError, setLoadError] = createSignal<string | undefined>()
   const [retryTick, setRetryTick] = createSignal(0)
   const waiting = () => props.pending || loading() || busy()
+  // The list is index-keyed, so a history load prepending blocks would rebind an open block: mount it only when settled.
+  const settled = () => !waiting() && !more()
   const text = () => {
     if (props.tab === "output") return output()
     // While history is partial the first user message may be a steering one: wait for the rest instead of showing it.
@@ -73,7 +84,7 @@ function OutputBlock(props: {
   let panel: HTMLDivElement | undefined
   onCleanup(() => (panel = undefined))
 
-  // Both tabs share the panel: switching must start at its top, not where the other tab was left.
+  // All three tabs share the panel: switching must start at its top, not where another tab was left.
   createEffect(() => {
     props.tab
     if (panel) panel.scrollTop = 0
@@ -93,16 +104,18 @@ function OutputBlock(props: {
     void props.data.message
       .loadMore(id, { all: true })
       .catch((error: unknown) => {
-        setInputError(ctx.t("output.error", { message: message(error) }))
+        setLoadError(ctx.t("output.error", { message: message(error) }))
       })
       .finally(() => setBusy(false))
   }
   createEffect(() => {
     const id = props.id
     retryTick()
-    if (props.tab !== "input" || inputError() !== undefined) {
-      // The error belongs to the input tab; leaving it drops the stale text.
-      if (props.tab !== "input") setInputError(undefined)
+    // Both history tabs read the same window, so both may need the older messages.
+    const historyTab = props.tab === "input" || props.tab === "reasoning"
+    if (!historyTab || loadError() !== undefined) {
+      // The error belongs to the history tabs; leaving them drops the stale text.
+      if (!historyTab) setLoadError(undefined)
       return
     }
     // A sync in flight will re-run this effect; only ask when it is done and history is still partial.
@@ -111,11 +124,11 @@ function OutputBlock(props: {
     requestLoad(id)
   })
 
-  // Picking the input tab again is the explicit retry: clear the error and give the load another chance.
+  // Picking a history tab again is the explicit retry: clear the error and give the load another chance.
   const openTab = (tab: OutputTab) => {
-    if (tab === "input") {
+    if (tab === "input" || tab === "reasoning") {
       loadFor = undefined
-      setInputError(undefined)
+      setLoadError(undefined)
       setRetryTick((tick) => tick + 1)
     }
     props.onTab(tab)
@@ -125,21 +138,27 @@ function OutputBlock(props: {
     queueMicrotask(() => document.getElementById(tabId(tab))?.focus({ preventScroll: true }))
   }
 
-  // WAI-ARIA tabs: arrows move between the two, Home/End jump to the first/last, and the inactive one is out of the tab order.
+  // WAI-ARIA tabs: arrows cycle through the three, Home/End jump to the first/last, and the inactive ones are out of the tab order.
+  const tabs: OutputTab[] = ["input", "reasoning", "output"]
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key === "Home" || event.key === "End") {
       event.preventDefault()
+      // Keyboard activation goes through `openTab` too, so the history retry resets like a mouse click.
       const next: OutputTab = event.key === "Home" ? "input" : "output"
-      props.onTab(next)
+      openTab(next)
       focusTab(next)
       return
     }
     if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
     event.preventDefault()
-    const next: OutputTab = props.tab === "input" ? "output" : "input"
-    props.onTab(next)
+    const step = event.key === "ArrowRight" ? 1 : -1
+    const next = tabs[(tabs.indexOf(props.tab) + step + tabs.length) % tabs.length]!
+    openTab(next)
     focusTab(next)
   }
+
+  const tabLabel = (tab: OutputTab) =>
+    ctx.t(tab === "input" ? "output.tab.input" : tab === "output" ? "output.tab.output" : "output.tab.reasoning")
 
   const tabButton = (tab: OutputTab) => (
     <button
@@ -153,7 +172,7 @@ function OutputBlock(props: {
       tabindex={props.tab === tab ? 0 : -1}
       onClick={() => openTab(tab)}
     >
-      {ctx.t(tab === "input" ? "output.tab.input" : "output.tab.output")}
+      {tabLabel(tab)}
     </button>
   )
 
@@ -161,6 +180,7 @@ function OutputBlock(props: {
     <>
       <div class="sd-tabs" role="tablist" aria-label={ctx.t("output.tabs")} onKeyDown={onKeyDown}>
         {tabButton("input")}
+        {tabButton("reasoning")}
         {tabButton("output")}
       </div>
       <div
@@ -169,15 +189,51 @@ function OutputBlock(props: {
         ref={(el) => (panel = el)}
         role="tabpanel"
         aria-labelledby={tabId(props.tab)}
+        tabIndex={0}
         style={{ "padding-left": `${8 + (props.depth + 1) * 14}px` }}
       >
         <Show
-          when={text()}
+          when={props.tab === "reasoning"}
           fallback={
-            <span class="sd-out-state">{inputError() ?? ctx.t(waiting() ? "output.loading" : empty())}</span>
+            <Show
+              when={text()}
+              fallback={
+                <span class="sd-out-state">{loadError() ?? ctx.t(waiting() ? "output.loading" : empty())}</span>
+              }
+            >
+              {(source) => <ctx.ui.Markdown text={source()} />}
+            </Show>
           }
         >
-          {(source) => <ctx.ui.Markdown text={source()} />}
+          <Show
+            when={loadError()}
+            fallback={
+              <Show
+                when={settled()}
+                fallback={<span class="sd-out-state">{ctx.t("reasoning.loading")}</span>}
+              >
+                <Show
+                  when={blocks().length > 0}
+                  fallback={<span class="sd-out-state">{ctx.t("reasoning.empty")}</span>}
+                >
+                  <Index each={blocks()}>
+                    {(block) => (
+                      <details class="sd-reason-block">
+                        <summary>
+                          <span>{reasoningSummary(block())}</span>
+                        </summary>
+                        <div class="sd-reason-text" tabIndex={0}>
+                          {block()}
+                        </div>
+                      </details>
+                    )}
+                  </Index>
+                </Show>
+              </Show>
+            }
+          >
+            {(error) => <span class="sd-out-state">{error()}</span>}
+          </Show>
         </Show>
       </div>
     </>
@@ -573,7 +629,44 @@ export function DashboardView(props: { session: MountedSession }) {
     )
   }
 
-  const rowView = (row: () => Row) => <div class="sd-item">{rowLine(row, "list")}</div>
+  const rowView = (row: () => Row) => {
+    const messages = createMemo(() => props.session.server.data.session.message.list(row().id))
+    const blocks = createMemo(() => reasoningBlocks(messages()).slice(-5))
+    // One guarded sync on the first running render: the inline panel is read-only, so a failure stays silent
+    // (the detail tab owns error reporting).
+    let synced = false
+    createEffect(() => {
+      // A pending stub is not in the client store yet: its sync would reject and burn the one attempt.
+      if (row().pending || row().status !== "running" || synced) return
+      if (messages().length > 0) {
+        synced = true
+        return
+      }
+      synced = true
+      void props.session.server.data.session.message.sync(row().id).catch(() => {})
+    })
+    return (
+      <div class="sd-item">
+        {rowLine(row, "list")}
+        <Show when={row().status === "running" && blocks().length > 0}>
+          <div class="sd-reason" style={{ "margin-left": `${20 + row().depth * 14}px` }}>
+            <Index each={blocks()}>
+              {(block) => (
+                <details class="sd-reason-block">
+                  <summary>
+                    <span>{reasoningSummary(block())}</span>
+                  </summary>
+                  <div class="sd-reason-text" tabIndex={0}>
+                    {block()}
+                  </div>
+                </details>
+              )}
+            </Index>
+          </div>
+        </Show>
+      </div>
+    )
+  }
 
   return (
     <div class="sd-root">
@@ -714,6 +807,7 @@ export const panelCss = `
 .sd-tab-active { color: var(--v2-text-text-base, inherit); background: var(--v2-background-bg-muted, rgba(127,127,127,.12)); }
 .sd-tab:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
 .sd-out { flex: 1 1 auto; min-height: 0; overflow: auto; box-sizing: border-box; margin: 0; padding: 6px 8px; border-radius: 4px; background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); font-size: 11px; }
+.sd-out:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
 .sd-out-state { color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-group { all: unset; display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 11px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
 .sd-group:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
@@ -726,4 +820,13 @@ export const panelCss = `
 .sd-footer-sep { flex: none; }
 .sd-muted { opacity: .55; }
 .sd-pending { font-style: italic; opacity: .8; }
+.sd-reason { display: flex; flex-direction: column; margin: 0 6px 4px 0; padding: 4px 6px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); font-size: 11px; line-height: 1.45; }
+.sd-reason-block > summary { display: flex; align-items: baseline; gap: 4px; padding: 2px 0; list-style: none; cursor: pointer; line-height: 1.45; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
+.sd-reason-block > summary::-webkit-details-marker { display: none; }
+.sd-reason-block > summary::before { content: "▸"; flex: none; width: 8px; }
+.sd-reason-block[open] > summary::before { content: "▾"; }
+.sd-reason-block > summary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-reason-block + .sd-reason-block { margin-top: 4px; }
+/* Caret 8px + gap 4px = 12px: the body's 11px margin plus its 1px border lands its text on the same line. */
+.sd-reason-text { margin-left: 11px; margin-top: 4px; margin-bottom: 4px; padding-left: 0; border-left: 1px solid var(--v2-border-border-base, rgba(127,127,127,.25)); line-height: 1.45; max-height: 240px; overflow: auto; white-space: pre-wrap; }
 `
