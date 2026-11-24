@@ -19,6 +19,9 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
+      - run: npm test
+      - name: dist is up to date
+        run: git diff --exit-code -- dist
       - name: Check tag matches package.json
         run: |
           version="$(node -p "require('./package.json').version")"
