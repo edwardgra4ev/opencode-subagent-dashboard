@@ -4,6 +4,16 @@ All notable changes to this plugin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions use
 [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- The command that opens the panel (**Open subagents** in the palette, `/agents`) has a default
+  keybind, `mod+alt+a`, and lives in Settings > Shortcuts under `navigation`. Rebind it there; the
+  panel's `+` menu item shows the current shortcut. The command only opens and shows the panel - it
+  does not toggle or close it: a tab that is in the strip but hidden comes back, one already on
+  screen stays as it is.
+
 ## [0.2.1] - 2026-11-24
 
 ### Fixed

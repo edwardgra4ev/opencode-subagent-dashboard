@@ -75,8 +75,11 @@ to the config directory:
 - Side region `+` menu, then **Subagents**.
 - Command palette, **Open subagents**.
 - `/agents` in the composer. It is disabled when no session is open.
-- Shortcut: the `+` menu item shows the shortcut of the command `subagent-dashboard.open`.
-  The plugin defines no default keybind; assign one to that command in Settings > Shortcuts.
+- Shortcut: `mod+alt+a` opens the panel by default. Rebind it in Settings > Shortcuts, section
+  `navigation`; the `+` menu item shows the shortcut the command `subagent-dashboard.open` has now.
+  The shortcut only opens and shows the panel: it does not toggle or close it. A panel whose tab is
+  in the strip but hidden comes back; one already on screen is left as it is. Without an open
+  session the command is disabled, so the shortcut does nothing either.
 
 ## What the panel shows
 

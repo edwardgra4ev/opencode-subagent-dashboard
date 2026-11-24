@@ -158,6 +158,9 @@ export default Plugin.define({
       (): Command => ({
         id: "open",
         title: ctx.t("command.open"),
+        // Default keybind; the command only opens, so pressing it again is harmless.
+        bind: "mod+alt+a",
+        section: "navigation",
         slash: { name: "agents" },
         enabled: !!ctx.sessions.current(),
         run: () => {
