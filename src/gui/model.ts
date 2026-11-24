@@ -193,9 +193,11 @@ export function userPromptText(messages: readonly SessionMessageInfo[]): string 
 
 export function formatTokens(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0"
-  if (n < 1000) return String(Math.round(n))
-  const scaled = n < 999_950 ? n / 1e3 : n / 1e6
-  const unit = n < 999_950 ? "k" : "M"
+  // Round once, then branch on the rounded value: 999.6 must get the `k` unit, not print "1000" bare.
+  const rounded = Math.round(n)
+  if (rounded < 1000) return String(rounded)
+  const scaled = rounded < 999_950 ? rounded / 1e3 : rounded / 1e6
+  const unit = rounded < 999_950 ? "k" : "M"
   const text = scaled.toFixed(1)
   return `${text.endsWith(".0") ? text.slice(0, -2) : text}${unit}`
 }
