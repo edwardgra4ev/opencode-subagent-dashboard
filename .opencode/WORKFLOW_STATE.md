@@ -1,92 +1,27 @@
-# Subagent Dashboard — workflow state
+# Задача: дефолтный хоткей открытия панели
 
-## Goal
-OpenCode Desktop GUI plugin: side panel `agents` listing subagents of the current session
-(tree, status, tokens, cost, time; click opens child tab). Full spec:
-`/home/gra4ev/.opencode/plan/subagent-dashboard-gui-plugin.md`.
+Ветка: `feat/panel-shortcut` (от `main` @ `e974e51`, релиз v0.2.1).
+Решение пользователя: из клавиатурной работы нужен только хоткей открытия панели — `mod+alt+a`.
+Вся vim-навигация снята; она целиком лежит в ветке `feat/keyboard-navigation` (коммит `03d3994`).
 
-## Facts
-- Project dir: `/mnt/hdd/Dev/opencode-plugins/opencode-subagent-dashboard` (started empty).
-- Git: init done on `main` (initial commit), task branch `feat/skeleton`.
-- API: `@opencode/plugin` pinned exactly `2.3.2` (GUI experimental). Solid JSX, Vite build to `dist/gui-experimental.cjs`.
-- Reference implementation (copy structure/style, NOT code): `/mnt/hdd/Dev/opencode-plugins/token-stats-gui-plugin`
-  (`package.json`, `tsconfig.json`, `vite.config.ts`, `src/gui.tsx`, `src/gui/definition.ts`, `src/gui/i18n.ts`,
-  `src/gui/panel.tsx`). Same deps and build scripts.
-- Data API (stage 2+, do not use yet): `session.server.data.session.list(): SessionInfo[]`,
-  `.status(id): "idle"|"running"`, `.missing(id)`, `.sync(id,{children:true})`, `.family(id)`,
-  `session.background[]`, `ctx.tabs.open({server,id},{focus:true})`.
-- `SessionInfo`: `{id, parentID?, projectID, agent?, model?, cost, tokens{input,output,reasoning,cache{read,write}},
-  outcome?:"succeeded"|"failed"|"interrupted", time{created,updated,busy?,idle?,viewed?,archived?}, title?, location}`.
-- Registered plugin dir must contain built `dist/gui-experimental.cjs` and `src/index.ts`; user adds
-  `/mnt/hdd/Dev/opencode-plugins/opencode-subagent-dashboard` to `plugins` in `~/.config/opencode/opencode.json`
-  (edit only after user confirms; a Desktop restart is needed).
+## Объём
+- `src/gui.tsx`: у существующей команды `open` (`subagent-dashboard.open`, палитра **Open subagents**,
+  `/agents`) — `bind: "mod+alt+a"` и `section: "navigation"`. Поведение `run` не менялось: `pin()` +
+  `ctx.layout.open`, только открывает/показывает, не переключает и не закрывает, фокус не трогает.
+- `dist/gui-experimental.cjs`: пересобран.
+- Доки: README en/ru (хоткей по умолчанию, переназначение в Settings › Shortcuts, раздел `navigation`,
+  что скрытая панель возвращается, показанная не трогается) + `CHANGELOG.md` `[Unreleased] → Added`.
+- Тесты не менялись: `main` 59 тестов в двух файлах, все зелёные.
 
-## Steps
-1. [done] Skeleton: package.json/tsconfig/vite, empty panel registered (Panel + MenuItem + Command `/agents`),
-   `npm i`, `npm run typecheck`, `npm run build` → `dist/gui-experimental.cjs`. Commit `f487759` on `feat/skeleton`.
-   Awaiting Desktop load check by user (plugin added to `~/.config/opencode/opencode.json`, needs restart).
-2. [done] Data: `src/gui/model.ts` + wiring. Commit `e260d31`.
-3. [done] UI rows/badges/footer/loading. Commit `60d47b3`.
-4. [done] Navigation: row click → `ctx.tabs.open`, missing rows disabled. Commit `d8bc60e`.
-5. [done] Polish: timer, only-active filter, finished collapse, >200 truncation, sticky footer. Commit `c735c39`.
-6. [done] Bottom-strip badge + completion notification. Commit `36fde8c`.
-7. [done] Docs (README/README.ru/CHANGELOG/LICENSE, `9ee35f0`), release metadata + committed bundle (`dc1aa01`).
-   Note: docs commit came before metadata commit in history; `dist/` matches current `src` (build clean).
+## Состояние
+- [x] ветка от `main`, дерево было чистым на старте
+- [x] реализация (`bind` + `section`), `build`/`typecheck`/`test` зелёные
+- [x] `reviewer` — 2 находки (комментарий в `gui.tsx`, формулировка «ничего не делает» в доках), обе исправлены
+- [x] доки
+- [ ] финальный гейт `tester`
+- [ ] подтверждение / коммит
 
-## Status
-Branch `feat/skeleton` ready for review/merge; not pushed, not merged. Desktop verification pending user restart.
-
-## Decisions
-- Panel id `agents`, key `${ctx.id}:agents`, region `side`, width 360, mobile order 62, icon `fork`,
-  tab `closable:"compact"`, `fallback:true`.
-- Command slash `agents`, MenuItem `session.panel` keybind `${ctx.id}.open`.
-- No RPC, no SQLite: only reactive GUI data APIs.
-- Order: tree order wins over global flat sort. `buildTree` sorts siblings (running first, then
-  `time.created` desc); `mergeBackground` no longer re-sorts the whole DFS list, so a child always stays under
-  its parent. Documented in README.
-- Depth cap 3, deeper children shown as a synthetic disabled "…" row.
-- Zero tokens/cost on a running row render as "—" (usage events may not have arrived yet).
-- Notify on arrival of a terminal status (succeeded/failed/interrupted), deduped per completion
-  (`endedAt`/`busyAt`), never on the first snapshot or a foreign session.
-- Panel state (`activeOnly`, `expanded`, `finishedOpen`) resets on session key change.
-
-## Follow-up (after 0.1.0)
-- User request 1: panel must stay open when switching session tabs. Layout tabs are stored per session in the GUI API,
-  so implement pinning: remember that the user keeps the panel open, auto-open it in the newly routed session,
-  unpin when the user closes the tab.
-- User request 2: show the subagent's last assistant output inline in the list. Chevron expands output under the row,
-  click on the row still opens the child chat; output = last assistant message text, loaded lazily via
-  `data.session.message.sync(id)` + `list(id)`.
-- User request 3: render that output as Markdown via `ctx.ui.Markdown` (app renderer, no custom parser).
-  Final layout (approved after two clarifications): expanding replaces the list — only the agent's row (fixed at the top)
-  and the output below it, which fills the remaining panel height and scrolls internally. One output at a time.
-
-- User request 4: panel UI state (filter, finished group, expanded, open output, list scroll) must survive remounts
-  (switching panel tabs) — keep it in a module-level map keyed by `session.key`.
-- User request 5: per-row token breakdown on a second line: `in · out · cache` (cache = read + write, tooltip with R/W).
-- User request 6: remove the `window.bottom` badge (the API gives each plugin its own footer row, so it cannot share a line
-  with git-status); show the running count in the panel tab title instead. Notifications move into `setup`.
-
-## Process rules (binding)
-- `dev` → `reviewer` → commit → `tester`. No commit and no test run before reviewer `OK`; no merge/tag before tester PASS.
-- No parallel writers on the same files/types. One writer at a time.
-
-- User request 7: token breakdown on one line (no second row): compact `↑in ↓out ⇄cache` in the main row; total column drops in favour
-  of the three buckets (footer keeps input+output totals).
-- User request 8: the expanded output gets two tabs — Input (the task the agent was given, i.e. the user prompt) and Output
-  (last assistant answer), switchable.
-- User request 9: the bottom summary shows input, output and cache separately (same compact notation), plus agents count and cost.
-
-## Release plan (user request)
-- Push to https://github.com/edwardgra4ev/opencode-subagent-dashboard (origin, branch main after merge).
-- CI/CD: adapt `token-stats-gui-plugin` workflows: `ci.yml` (npm ci, typecheck, build, `git diff --exit-code -- dist`)
-  on push/PR; `release.yml` on `v*` tags (typecheck, build, tag == package.json version, zip src+dist+docs,
-  `softprops/action-gh-release`).
-- Release: bump/tag `v0.1.0`, merge `feat/skeleton` → `main`, push main + tag.
-
-## Verification log
-- Step 1: `npm run typecheck` exit 0; `npm run build` exit 0.
-- Steps 2–6: typecheck/build exit 0 after each commit; tester harness (outside repo) 121/121 PASS at `da39f4c`,
-  32 failures on the pre-fix tree; reviewer: no BLOCK, all FIX items fixed in `4cda389` + `da39f4c`.
-- Desktop load, themes, notifications, click navigation: not verified (needs app restart).
-- No test runner in repo: model/UI checks live in /tmp harnesses only (open risk).
+## Не проверено
+- Реальное срабатывание `mod+alt+a` в Desktop (в т.ч. `mod` = Cmd на macOS) и конфликт с хоткеями хоста —
+  только вручную, после reload плагина.
+- Компонентный путь плагина юнит-тестами не покрыть: раннер host-free (`model`, `panel-state`).

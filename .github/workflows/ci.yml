@@ -20,5 +20,6 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build
+      - run: npm test
       - name: dist is up to date
         run: git diff --exit-code -- dist

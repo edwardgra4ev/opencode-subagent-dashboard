@@ -4,6 +4,56 @@ All notable changes to this plugin are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), versions use
 [SemVer](https://semver.org/).
 
+## [0.2.2] - 2026-11-24
+
+### Added
+
+- The command that opens the panel (**Open subagents** in the palette, `/agents`) has a default
+  keybind, `mod+alt+a`, and lives in Settings > Shortcuts under `navigation`. Rebind it there; the
+  panel's `+` menu item shows the current shortcut. The command only opens and shows the panel - it
+  does not toggle or close it: a tab that is in the strip but hidden comes back, one already on
+  screen stays as it is.
+
+## [0.2.1] - 2026-11-24
+
+### Fixed
+
+- Token counts that round up to 1000 read `1k` instead of a bare `1000` next to it; only
+  non-integer usage values reach this case.
+- Per-session panel state (filter, finished group, expansion, open detail, scroll), kept forever for
+  sessions whose panel was never closed, is now bounded: the 100 most recently used sessions are
+  kept, and the least recently used one is dropped beyond that.
+
+### Internal
+
+- The panel's view code is split into modules (`row`, `output`, `bits`, `css`, `panel-state`) with
+  no change in look or interaction; shared markup (reasoning blocks, token chips) is rendered by
+  one component each.
+- Unit tests for the model, the formatters and the panel-state cache: `npm test` (`vitest`), 59
+  cases in 2 files.
+- CI and the release workflow run `npm test`, and both fail if the tracked `dist/gui-experimental.cjs`
+  differs from a fresh build.
+
+## [0.2.0] - 2026-11-23
+
+### Added
+
+- Inline reasoning preview under a running subagent's row: the last five reasoning blocks, oldest
+  first, each collapsed to a `▸` line with a one-line preview that expands in place and scrolls
+  inside a 240px-tall body. Only running rows show it; it disappears when the subagent finishes.
+- `Reasoning` tab in the detail, between **Input** and **Output**: every reasoning block of the
+  subagent as the same collapsible blocks, loading older history like the Input tab, with
+  `Loading reasoning…`, `No reasoning recorded` and an inline error retried by clicking the tab.
+- `←`/`→` cycle the three tabs and `Home`/`End` jump to Input and Output; the detail's tab strip
+  and scrolling area take keyboard focus and show a focus ring.
+
+## [0.1.1] - 2026-11-22
+
+### Fixed
+
+- The side panel no longer asks for a width of its own, so selecting its tab leaves the sidebar at the
+  shared width like the other tabs; a width an earlier version saved for the panel no longer applies.
+
 ## [0.1.0] - 2026-11-22
 
 ### Added

@@ -166,6 +166,21 @@ export function lastAssistantText(messages: readonly SessionMessageInfo[]): stri
   return undefined
 }
 
+/** Every reasoning part of the assistant messages, in the order the model produced them. */
+export function reasoningBlocks(messages: readonly SessionMessageInfo[]): string[] {
+  const blocks: string[] = []
+  for (const message of messages) {
+    if (message.type !== "assistant") continue
+    for (const part of message.content) {
+      if (part.type !== "reasoning") continue
+      // A part's text changes in place while it streams, so it must be read on every call, never cached by identity.
+      const text = part.text.trim()
+      if (text) blocks.push(text)
+    }
+  }
+  return blocks
+}
+
 /** The task the agent was given: the first user message with text. Later steering messages are not part of it. */
 export function userPromptText(messages: readonly SessionMessageInfo[]): string | undefined {
   for (const message of messages) {
@@ -178,9 +193,11 @@ export function userPromptText(messages: readonly SessionMessageInfo[]): string 
 
 export function formatTokens(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return "0"
-  if (n < 1000) return String(Math.round(n))
-  const scaled = n < 999_950 ? n / 1e3 : n / 1e6
-  const unit = n < 999_950 ? "k" : "M"
+  // Round once, then branch on the rounded value: 999.6 must get the `k` unit, not print "1000" bare.
+  const rounded = Math.round(n)
+  if (rounded < 1000) return String(rounded)
+  const scaled = rounded < 999_950 ? rounded / 1e3 : rounded / 1e6
+  const unit = rounded < 999_950 ? "k" : "M"
   const text = scaled.toFixed(1)
   return `${text.endsWith(".0") ? text.slice(0, -2) : text}${unit}`
 }

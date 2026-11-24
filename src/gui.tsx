@@ -1,7 +1,9 @@
 import { Command, MenuItem, Panel, Plugin, Style, createKeyed, type PanelTab } from "@opencode/plugin/gui"
 import { createEffect, createMemo, createSignal } from "solid-js"
 import { definition } from "./gui/definition.js"
-import { DashboardView, forgetPanelState, panelCss } from "./gui/dashboard.js"
+import { DashboardView } from "./gui/dashboard.js"
+import { forgetPanelState } from "./gui/panel-state.js"
+import { panelCss } from "./gui/css.js"
 import { visibleRows, type AgentStatus } from "./gui/model.js"
 
 type Snapshot = { status: AgentStatus; title: string; agent?: string; endedAt?: number; busyAt?: number }
@@ -108,9 +110,11 @@ export default Plugin.define({
     }
 
     const panel: Panel = {
-      id: "agents",
+      // The panel id keys the app's stored side width and its narrow-screen mobile view, so a width the user
+      // dragged under the old id is no longer read; the tab id and its `agents` key are unchanged, so stored
+      // tabs and pinning survive.
+      id: "agents-side",
       region: "side",
-      width: 360,
       mobile: {
         get title() {
           return ctx.t("panel.title")
@@ -154,6 +158,9 @@ export default Plugin.define({
       (): Command => ({
         id: "open",
         title: ctx.t("command.open"),
+        // Default keybind; the command only opens, so pressing it again is harmless.
+        bind: "mod+alt+a",
+        section: "navigation",
         slash: { name: "agents" },
         enabled: !!ctx.sessions.current(),
         run: () => {

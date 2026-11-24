@@ -1,212 +1,24 @@
 import { For, Show, batch, createEffect, createMemo, createSignal, onCleanup, untrack } from "solid-js"
 import { createKeyed, usePlugin, type MountedSession } from "@opencode/plugin/gui"
-import {
-  formatCost,
-  formatElapsed,
-  formatTokens,
-  lastAssistantText,
-  userPromptText,
-  visibleRows,
-  type Row,
-  type SessionData,
-} from "./model.js"
+import { formatCost, formatTokens, visibleRows, type Row } from "./model.js"
 import type { definition } from "./definition.js"
+import { TokenChip } from "./bits.js"
+import { OutputBlock, message, type OutputTab } from "./output.js"
+import { rowLine, rowView, type RowUi } from "./row.js"
+import { panelState } from "./panel-state.js"
 
 /** Rows rendered before the list asks whether to show the rest. */
 const ROW_LIMIT = 200
 /** Finished groups up to this size start expanded. */
 const FINISHED_AUTO_LIMIT = 5
 
-function message(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === "object" && error && "message" in error) return String(error.message)
-  return String(error)
+/** Ellipsis markers are not rows the user can pick or count; the truncation count needs no filtered copy. */
+function nonEllipsisCount(rows: readonly Row[]): number {
+  let count = 0
+  for (const row of rows) if (!row.ellipsis) count++
+  return count
 }
 
-function rowTime(row: Row, now: number): string {
-  // Running wins: a resumed session keeps a stale `time.idle`, and its elapsed time must not freeze.
-  if (row.status === "running" && row.busyAt !== undefined) return formatElapsed(now - row.busyAt)
-  if (row.endedAt !== undefined && row.busyAt !== undefined) return formatElapsed(row.endedAt - row.busyAt)
-  return "—"
-}
-
-function rowCost(row: Row): string {
-  return row.status === "running" && row.cost === 0 ? "—" : formatCost(row.cost)
-}
-
-/** The two views of a subagent's transcript. */
-type OutputTab = "input" | "output"
-
-/** A subagent's prompt and last assistant text, loaded on first expansion, in two tabs. */
-function OutputBlock(props: {
-  data: SessionData
-  id: string
-  depth: number
-  pending: boolean
-  tab: OutputTab
-  onTab: (tab: OutputTab) => void
-}) {
-  const ctx = usePlugin<typeof definition>()
-  const messages = createMemo(() => props.data.message.list(props.id))
-  const input = createMemo(() => userPromptText(messages()))
-  const output = createMemo(() => lastAssistantText(messages()))
-  const loading = () => props.data.message.loading(props.id)
-  const more = () => props.data.message.more(props.id)
-  // Own request state: the store's `loading` may stay false while `loadMore` runs, and a failure must be visible.
-  const [busy, setBusy] = createSignal(false)
-  const [inputError, setInputError] = createSignal<string | undefined>()
-  const [retryTick, setRetryTick] = createSignal(0)
-  const waiting = () => props.pending || loading() || busy()
-  const text = () => {
-    if (props.tab === "output") return output()
-    // While history is partial the first user message may be a steering one: wait for the rest instead of showing it.
-    return more() ? undefined : input()
-  }
-  // With older messages on the server the prompt may still be coming: only claim there is none once nothing is left to load.
-  const empty = () => {
-    if (props.tab === "output") return "output.empty"
-    return more() ? "output.loading" : "output.inputEmpty"
-  }
-  const tabId = (tab: OutputTab) => `sd-tab-${tab}-${props.id}`
-  const panelId = () => `sd-out-${props.id}`
-
-  let panel: HTMLDivElement | undefined
-  onCleanup(() => (panel = undefined))
-
-  // Both tabs share the panel: switching must start at its top, not where the other tab was left.
-  createEffect(() => {
-    props.tab
-    if (panel) panel.scrollTop = 0
-  })
-
-  // The store may hold only the newest messages: fetch the rest so the first prompt is found. A `message.sync` can
-  // shrink the window again, hence one extra load per open; an error stops automatic retries until the user retries.
-  let loadFor: string | undefined
-  let loadCount = 0
-  const requestLoad = (id: string) => {
-    if (loadFor !== id) {
-      loadFor = id
-      loadCount = 0
-    }
-    loadCount++
-    setBusy(true)
-    void props.data.message
-      .loadMore(id, { all: true })
-      .catch((error: unknown) => {
-        setInputError(ctx.t("output.error", { message: message(error) }))
-      })
-      .finally(() => setBusy(false))
-  }
-  createEffect(() => {
-    const id = props.id
-    retryTick()
-    if (props.tab !== "input" || inputError() !== undefined) {
-      // The error belongs to the input tab; leaving it drops the stale text.
-      if (props.tab !== "input") setInputError(undefined)
-      return
-    }
-    // A sync in flight will re-run this effect; only ask when it is done and history is still partial.
-    if (!more() || loading() || busy()) return
-    if (loadFor === id && loadCount >= 2) return
-    requestLoad(id)
-  })
-
-  // Picking the input tab again is the explicit retry: clear the error and give the load another chance.
-  const openTab = (tab: OutputTab) => {
-    if (tab === "input") {
-      loadFor = undefined
-      setInputError(undefined)
-      setRetryTick((tick) => tick + 1)
-    }
-    props.onTab(tab)
-  }
-
-  const focusTab = (tab: OutputTab) => {
-    queueMicrotask(() => document.getElementById(tabId(tab))?.focus({ preventScroll: true }))
-  }
-
-  // WAI-ARIA tabs: arrows move between the two, Home/End jump to the first/last, and the inactive one is out of the tab order.
-  const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key === "Home" || event.key === "End") {
-      event.preventDefault()
-      const next: OutputTab = event.key === "Home" ? "input" : "output"
-      props.onTab(next)
-      focusTab(next)
-      return
-    }
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
-    event.preventDefault()
-    const next: OutputTab = props.tab === "input" ? "output" : "input"
-    props.onTab(next)
-    focusTab(next)
-  }
-
-  const tabButton = (tab: OutputTab) => (
-    <button
-      type="button"
-      role="tab"
-      id={tabId(tab)}
-      class="sd-tab"
-      classList={{ "sd-tab-active": props.tab === tab }}
-      aria-selected={props.tab === tab}
-      aria-controls={panelId()}
-      tabindex={props.tab === tab ? 0 : -1}
-      onClick={() => openTab(tab)}
-    >
-      {ctx.t(tab === "input" ? "output.tab.input" : "output.tab.output")}
-    </button>
-  )
-
-  return (
-    <>
-      <div class="sd-tabs" role="tablist" aria-label={ctx.t("output.tabs")} onKeyDown={onKeyDown}>
-        {tabButton("input")}
-        {tabButton("output")}
-      </div>
-      <div
-        class="sd-out"
-        id={panelId()}
-        ref={(el) => (panel = el)}
-        role="tabpanel"
-        aria-labelledby={tabId(props.tab)}
-        style={{ "padding-left": `${8 + (props.depth + 1) * 14}px` }}
-      >
-        <Show
-          when={text()}
-          fallback={
-            <span class="sd-out-state">{inputError() ?? ctx.t(waiting() ? "output.loading" : empty())}</span>
-          }
-        >
-          {(source) => <ctx.ui.Markdown text={source()} />}
-        </Show>
-      </div>
-    </>
-  )
-}
-
-type PanelUiState = {
-  activeOnly: boolean
-  finishedOpen: boolean | undefined
-  expanded: boolean
-  openOutput: string | undefined
-  scrollTop: number
-}
-
-/** Per-session view state, kept at module level so it survives the host remounting the panel on a tab switch. */
-const panelStates = new Map<string, PanelUiState>()
-
-function panelState(key: string): PanelUiState {
-  const found = panelStates.get(key)
-  if (found) return found
-  const created: PanelUiState = { activeOnly: false, finishedOpen: undefined, expanded: false, openOutput: undefined, scrollTop: 0 }
-  panelStates.set(key, created)
-  return created
-}
-
-/** Drops a closed panel's view state: the session no longer shows the panel, so nothing will restore it. */
-export function forgetPanelState(sessionKey: string) {
-  panelStates.delete(sessionKey)
-}
 
 export function DashboardView(props: { session: MountedSession }) {
   const ctx = usePlugin<typeof definition>()
@@ -302,8 +114,6 @@ export function DashboardView(props: { session: MountedSession }) {
 
   const rows = createMemo(() => visibleRows(props.session.server.data.session, props.session))
   const byId = createMemo(() => new Map(rows().map((row) => [row.id, row])))
-  // Ellipsis markers are not rows the user can pick or count.
-  const count = createMemo(() => rows().filter((row) => !row.ellipsis).length)
 
   const anyRunning = createMemo(() => rows().some((row) => row.status === "running"))
 
@@ -313,6 +123,29 @@ export function DashboardView(props: { session: MountedSession }) {
     const timer = setInterval(() => setNow(Date.now()), 1000)
     onCleanup(() => clearInterval(timer))
   })
+
+  // An ellipsis marker stays right after its parent, so it joins its parent's list rather than the finished group.
+  // Both counts come from this same pass: an ellipsis marker is not a row the user can pick or count.
+  const split = createMemo(() => {
+    const running: Row[] = []
+    const done: Row[] = []
+    let runningCount = 0
+    let doneCount = 0
+    let target = done
+    for (const row of rows()) {
+      if (!row.ellipsis) target = row.status === "running" ? running : done
+      target.push(row)
+      if (row.ellipsis) continue
+      if (target === running) runningCount++
+      else doneCount++
+    }
+    return { running, done, runningCount, doneCount }
+  })
+  const active = createMemo(() => split().running)
+  const finished = createMemo(() => split().done)
+  const count = createMemo(() => split().runningCount + split().doneCount)
+  const activeCount = createMemo(() => split().runningCount)
+  const finishedCount = createMemo(() => split().doneCount)
 
   const footer = createMemo(() => {
     let input = 0
@@ -340,21 +173,6 @@ export function DashboardView(props: { session: MountedSession }) {
     }
   })
 
-  // An ellipsis marker stays right after its parent, so it joins its parent's list rather than the finished group.
-  const split = createMemo(() => {
-    const running: Row[] = []
-    const done: Row[] = []
-    let target = done
-    for (const row of rows()) {
-      if (!row.ellipsis) target = row.status === "running" ? running : done
-      target.push(row)
-    }
-    return { running, done }
-  })
-  const active = createMemo(() => split().running)
-  const finished = createMemo(() => split().done)
-  const activeCount = createMemo(() => active().filter((row) => !row.ellipsis).length)
-  const finishedCount = createMemo(() => finished().filter((row) => !row.ellipsis).length)
   const finishedExpanded = () => finishedOpen() ?? finishedCount() <= FINISHED_AUTO_LIMIT
 
   const visible = createMemo(() => {
@@ -366,9 +184,7 @@ export function DashboardView(props: { session: MountedSession }) {
     const all = visible()
     return expanded() || all.length <= ROW_LIMIT ? all : all.slice(0, ROW_LIMIT)
   })
-  const more = createMemo(
-    () => visible().filter((row) => !row.ellipsis).length - shown().filter((row) => !row.ellipsis).length,
-  )
+  const more = createMemo(() => nonEllipsisCount(visible()) - nonEllipsisCount(shown()))
   const shownSplit = createMemo(() => {
     const running = new Set(active().map((row) => row.id))
     return {
@@ -466,114 +282,16 @@ export function DashboardView(props: { session: MountedSession }) {
     })
   }
 
-  /** The three token buckets of a row plus their total. A run with nothing used yet shows one dash instead. */
-  const tokenGroups = (row: Row) => {
-    const tokens = row.tokens
-    const cache = tokens.cacheRead + tokens.cacheWrite
-    const total = tokens.input + tokens.output + cache
-    const empty = tokens.input === 0 && tokens.output === 0 && cache === 0
-    const input = formatTokens(tokens.input)
-    const output = formatTokens(tokens.output)
-    const cacheRead = formatTokens(tokens.cacheRead)
-    const cacheWrite = formatTokens(tokens.cacheWrite)
-    const sum = formatTokens(total)
-    return {
-      dash: empty && (row.status === "running" || row.pending),
-      input,
-      output,
-      cacheRead,
-      cacheWrite,
-      total: sum,
-      aria: `${ctx.t("row.breakdown", { input, output, cache: formatTokens(cache) })} · ${ctx.t("footer.total")} ${sum}`,
-      inputAria: `${ctx.t("token.input")} ${input}`,
-      outputAria: `${ctx.t("token.output")} ${output}`,
-      cacheReadAria: `${ctx.t("token.cacheRead")} ${cacheRead}`,
-      cacheWriteAria: `${ctx.t("token.cacheWrite")} ${cacheWrite}`,
-      totalAria: `${ctx.t("footer.total")} ${sum}`,
-    }
+  // The rows live in their own module: they get the live session through a getter, so a swap needs no rebuild.
+  const rowUi: RowUi = {
+    ctx,
+    get session() {
+      return props.session
+    },
+    now,
+    trackRow,
+    toggleOutput,
   }
-
-  // Shared by the list and the detail header: the row toggles the detail, the trailing button opens the chat.
-  const rowLine = (row: () => Row, where: "list" | "detail") => {
-    const groups = createMemo(() => tokenGroups(row()))
-    return (
-      <div class="sd-rowline">
-        <button
-          type="button"
-          class="sd-row"
-          ref={(el) => trackRow(el, row().id, where)}
-          aria-expanded={where === "detail"}
-          classList={{
-            "sd-muted": row().missing,
-            "sd-pending": row().pending,
-            "sd-deep": row().depth > 0,
-          }}
-          style={{ "padding-left": `${8 + row().depth * 14}px` }}
-          disabled={row().missing && where !== "detail"}
-          aria-hidden={row().ellipsis ? "true" : undefined}
-          aria-label={
-            row().ellipsis
-              ? undefined
-              : `${row().agent ?? "—"} · ${row().title} · ${ctx.t(`status.${row().status}`)} · ${groups().aria}`
-          }
-          onClick={() => {
-            if (row().ellipsis) return
-            toggleOutput(row().id)
-          }}
-        >
-          <Show when={!row().ellipsis} fallback={<span class="sd-title">…</span>}>
-            <span class={`sd-dot sd-dot-${row().status}`} />
-            <span class="sd-agent">{row().agent ?? "—"}</span>
-            {/* The full title stays in the row's aria-label; the visible one only ellipsizes. */}
-            <span class="sd-title">{row().title}</span>
-            <span class="sd-meta">
-              <Show when={!groups().dash} fallback={<span class="sd-tok">—</span>}>
-                <span class="sd-tok" role="img" aria-label={groups().inputAria}>
-                  <span class="sd-tok-icon" aria-hidden="true">↑</span>
-                  <span class="sd-tok-text">{groups().input}</span>
-                </span>
-                <span class="sd-tok" role="img" aria-label={groups().outputAria}>
-                  <span class="sd-tok-icon" aria-hidden="true">↓</span>
-                  <span class="sd-tok-text">{groups().output}</span>
-                </span>
-                <span class="sd-tok" role="img" aria-label={groups().cacheReadAria}>
-                  <span class="sd-tok-icon" aria-hidden="true">R</span>
-                  <span class="sd-tok-text">{groups().cacheRead}</span>
-                </span>
-                <span class="sd-tok" role="img" aria-label={groups().cacheWriteAria}>
-                  <span class="sd-tok-icon" aria-hidden="true">W</span>
-                  <span class="sd-tok-text">{groups().cacheWrite}</span>
-                </span>
-                <span class="sd-num" role="img" aria-label={groups().totalAria}>
-                  {groups().total}
-                </span>
-                <span class="sd-num">{rowCost(row())}</span>
-                <span class="sd-num sd-time">{rowTime(row(), now())}</span>
-              </Show>
-            </span>
-          </Show>
-        </button>
-        <Show when={!row().ellipsis}>
-          <ctx.ui.Tooltip value={ctx.t("row.openChat")}>
-            <ctx.ui.IconButton
-              class="sd-open"
-              icon="square-arrow-top-right"
-              size="small"
-              variant="ghost-muted"
-              label={ctx.t("row.openChat")}
-              disabled={row().missing}
-              onClick={(event) => {
-                event.stopPropagation()
-                ctx.tabs.open({ server: props.session.server.id, id: row().id }, { focus: true })
-              }}
-            />
-          </ctx.ui.Tooltip>
-        </Show>
-      </div>
-    )
-  }
-
-  const rowView = (row: () => Row) => <div class="sd-item">{rowLine(row, "list")}</div>
 
   return (
     <div class="sd-root">
@@ -599,7 +317,7 @@ export function DashboardView(props: { session: MountedSession }) {
               >
                 <Show when={!activeOnly() || activeCount() > 0} fallback={<div class="sd-empty">{ctx.t("filter.empty")}</div>}>
                   <div class="sd-list">
-                    <For each={activeIds()}>{(id) => rowView(() => byId().get(id)!)}</For>
+                    <For each={activeIds()}>{(id) => rowView(rowUi, () => byId().get(id)!)}</For>
                     <Show when={finishedGroup()}>
                       <button
                         type="button"
@@ -611,7 +329,7 @@ export function DashboardView(props: { session: MountedSession }) {
                         {ctx.t("group.finished", { count: finishedCount() })}
                       </button>
                     </Show>
-                    <For each={finishedIds()}>{(id) => rowView(() => byId().get(id)!)}</For>
+                    <For each={finishedIds()}>{(id) => rowView(rowUi, () => byId().get(id)!)}</For>
                     <Show when={more() > 0}>
                       <button type="button" class="sd-more" onClick={() => setExpanded(true)}>
                         {ctx.t("state.more", { count: more() })}
@@ -626,7 +344,7 @@ export function DashboardView(props: { session: MountedSession }) {
       >
         {(row) => (
           <div class="sd-detail">
-            {rowLine(row, "detail")}
+            {rowLine(rowUi, row, "detail")}
             <OutputBlock
               data={props.session.server.data.session}
               id={row().id}
@@ -642,25 +360,13 @@ export function DashboardView(props: { session: MountedSession }) {
         <div class="sd-footer" role="group" aria-label={ctx.t("footer.summary", footer())}>
           <span>{ctx.t("footer.agents", { count: footer().count })}</span>
           <span class="sd-footer-sep" aria-hidden="true">·</span>
-          <span class="sd-tok" role="img" aria-label={`${ctx.t("token.input")} ${footer().input}`}>
-            <span class="sd-tok-icon" aria-hidden="true">↑</span>
-            <span class="sd-tok-text">{footer().input}</span>
-          </span>
+          <TokenChip icon="↑" label={`${ctx.t("token.input")} ${footer().input}`} text={footer().input} />
           <span class="sd-footer-sep" aria-hidden="true">·</span>
-          <span class="sd-tok" role="img" aria-label={`${ctx.t("token.output")} ${footer().output}`}>
-            <span class="sd-tok-icon" aria-hidden="true">↓</span>
-            <span class="sd-tok-text">{footer().output}</span>
-          </span>
+          <TokenChip icon="↓" label={`${ctx.t("token.output")} ${footer().output}`} text={footer().output} />
           <span class="sd-footer-sep" aria-hidden="true">·</span>
-          <span class="sd-tok" role="img" aria-label={`${ctx.t("token.cacheRead")} ${footer().cacheRead}`}>
-            <span class="sd-tok-icon" aria-hidden="true">R</span>
-            <span class="sd-tok-text">{footer().cacheRead}</span>
-          </span>
+          <TokenChip icon="R" label={`${ctx.t("token.cacheRead")} ${footer().cacheRead}`} text={footer().cacheRead} />
           <span class="sd-footer-sep" aria-hidden="true">·</span>
-          <span class="sd-tok" role="img" aria-label={`${ctx.t("token.cacheWrite")} ${footer().cacheWrite}`}>
-            <span class="sd-tok-icon" aria-hidden="true">W</span>
-            <span class="sd-tok-text">{footer().cacheWrite}</span>
-          </span>
+          <TokenChip icon="W" label={`${ctx.t("token.cacheWrite")} ${footer().cacheWrite}`} text={footer().cacheWrite} />
           <span class="sd-footer-sep" aria-hidden="true">·</span>
           <span class="sd-tok" role="img" aria-label={`${ctx.t("footer.total")} ${footer().total}`}>
             <span class="sd-tok-text">
@@ -674,56 +380,3 @@ export function DashboardView(props: { session: MountedSession }) {
     </div>
   )
 }
-
-export const panelCss = `
-.sd-root { box-sizing: border-box; height: 100%; display: flex; flex-direction: column; gap: 8px; padding: 8px; overflow: hidden; font-size: 12px; }
-.sd-head { flex: none; }
-.sd-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden; }
-.sd-detail { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.sd-detail > .sd-rowline { flex: none; }
-.sd-empty { padding: 12px 8px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
-.sd-list { display: flex; flex-direction: column; }
-.sd-item { display: block; }
-.sd-rowline { display: flex; align-items: center; gap: 3px; }
-.sd-open { flex: none; }
-.sd-row { all: unset; display: flex; align-items: center; flex-wrap: nowrap; gap: 4px; box-sizing: border-box; flex: 1 1 auto; min-width: 0; min-height: 22px; padding: 2px 6px; border-radius: 4px; cursor: pointer; overflow: hidden; }
-.sd-row:hover:not(:disabled) { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
-.sd-row:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
-.sd-row:disabled { cursor: default; }
-.sd-deep { border-left: 1px solid var(--v2-border-border-base, rgba(127,127,127,.25)); }
-.sd-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--v2-text-text-faint, rgba(127,127,127,.7)); }
-.sd-dot-running { background: var(--v2-blue-600, #3b82f6); animation: sd-pulse 1.6s ease-in-out infinite; }
-@keyframes sd-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
-@media (prefers-reduced-motion: reduce) { .sd-dot-running { animation: none; } }
-.sd-dot-succeeded { background: var(--v2-green-600, #30a46c); }
-.sd-dot-failed { background: var(--v2-red-600, #e5484d); }
-.sd-dot-interrupted { background: var(--v2-orange-600, #f76b15); }
-.sd-agent { flex: none; max-width: 14%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; border-radius: 3px; background: var(--v2-background-bg-muted, rgba(127,127,127,.12)); }
-.sd-title { display: block; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sd-meta { display: flex; align-items: baseline; gap: 3px; flex: none; margin-left: auto; white-space: nowrap; }
-/* Same line box height in every cell; the smaller token text is nudged down onto the numbers' baseline. */
-.sd-meta > * { line-height: 1.4; }
-.sd-num { flex: none; line-height: 1.4; font-variant-numeric: tabular-nums; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
-.sd-time { min-width: 22px; text-align: right; }
-.sd-tok { flex: none; display: inline-flex; align-items: baseline; gap: 2px; font-size: 10px; line-height: 1.4; transform: translateY(1px); font-variant-numeric: tabular-nums; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); white-space: nowrap; }
-.sd-tok-icon { flex: none; display: inline-flex; align-items: center; line-height: 1; }
-.sd-tok-text { flex: none; }
-.sd-tabs { flex: none; display: flex; gap: 2px; border-bottom: 1px solid var(--v2-border-border-base, rgba(127,127,127,.25)); }
-.sd-tab { all: unset; box-sizing: border-box; padding: 3px 8px; border-radius: 4px 4px 0 0; cursor: pointer; font-size: 11px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
-.sd-tab:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
-.sd-tab-active { color: var(--v2-text-text-base, inherit); background: var(--v2-background-bg-muted, rgba(127,127,127,.12)); }
-.sd-tab:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
-.sd-out { flex: 1 1 auto; min-height: 0; overflow: auto; box-sizing: border-box; margin: 0; padding: 6px 8px; border-radius: 4px; background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); font-size: 11px; }
-.sd-out-state { color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
-.sd-group { all: unset; display: flex; align-items: center; gap: 4px; box-sizing: border-box; width: 100%; padding: 4px 6px; border-radius: 4px; cursor: pointer; font-size: 11px; color: var(--v2-text-text-muted, rgba(127,127,127,.9)); }
-.sd-group:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
-.sd-group:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
-.sd-caret { flex: none; width: 8px; }
-.sd-more { all: unset; padding: 4px 6px; border-radius: 4px; cursor: pointer; color: var(--v2-blue-600, #3b82f6); }
-.sd-more:hover { background: var(--v2-background-bg-muted, rgba(127,127,127,.08)); }
-.sd-more:focus-visible { outline: 1px solid var(--v2-blue-600, #3b82f6); outline-offset: -1px; }
-.sd-footer { flex: none; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px; padding: 6px 2px 0; border-top: 1px solid var(--v2-border-border-base, rgba(127,127,127,.25)); color: var(--v2-text-text-muted, rgba(127,127,127,.9)); font-size: 10px; }
-.sd-footer-sep { flex: none; }
-.sd-muted { opacity: .55; }
-.sd-pending { font-style: italic; opacity: .8; }
-`

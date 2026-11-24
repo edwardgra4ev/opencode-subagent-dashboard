@@ -1,6 +1,6 @@
 {
   "name": "opencode-subagent-dashboard",
-  "version": "0.1.0",
+  "version": "0.2.2",
   "description": "OpenCode Desktop GUI plugin: side panel with subagents of the current session",
   "private": true,
   "type": "module",
@@ -31,7 +31,8 @@
   "scripts": {
     "build": "vite build",
     "watch": "vite build --watch",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@opencode/plugin": "2.3.2"
@@ -41,6 +42,7 @@
     "solid-js": "^1.9.0",
     "typescript": "^5.9.0",
     "vite": "^7.0.0",
-    "vite-plugin-solid": "^2.11.0"
+    "vite-plugin-solid": "^2.11.0",
+    "vitest": "^4.1.12"
   }
 }
